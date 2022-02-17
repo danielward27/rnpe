@@ -13,7 +13,7 @@ from tqdm import tqdm
 def get_made_transformation(  # TODO add option for hidden dim size/layers!
     flow_layers : int = 5
     ):
-    transformation = flows.Serial(*(flows.MADE(masked_transform), flows.Reverse()) * flow_layers)  # TODO shuffle instead of reverse?  
+    transformation = flows.Serial(*(flows.MADE(masked_transform), flows.Reverse()) * flow_layers) 
     return transformation
 
 
@@ -89,8 +89,8 @@ def train_marginal_flow(
             print("Maximum patience reached.")
             break
 
-    FlowTuple = namedtuple("Flow", "log_prob sample transform_noise")
-    flow = FlowTuple(
+    Flow = namedtuple("Flow", "log_prob sample transform_noise")
+    flow = Flow(
         *[partial(f, params=best_params) for f in [log_prob, sample, inverse_fun]]
         )
     return  flow, losses

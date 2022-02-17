@@ -29,7 +29,6 @@ def masked_transform(rng, input_dim): # TODO why num hidden 1 here but 2 above?
     return params, apply_fun
 
 
-
 def train_val_split(
     key: random.PRNGKey,
     x: np.DeviceArray,
