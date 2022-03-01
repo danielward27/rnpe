@@ -40,7 +40,6 @@ mcmc = MCMC(
 mcmc.run(random.PRNGKey(42), y_obs, flow)
 mcmc.print_summary()
 
-
 # %% Plot posterior pairplot
 import numpy as onp
 import seaborn as sns
@@ -73,15 +72,10 @@ df_combined = pd.concat([df_x, df_denoised_x, df_obs])
 df_combined = df_combined.reset_index(drop=True)
 
 # %%
-ax = sns.kdeplot(data=df_combined, x="x0", y="x1", hue="source", fill=True, common_norm = False, alpha=0.7)
-plt.scatter(x=y_obs_onp[0], y=y_obs_onp[1], color="green")
-ax.legend_.set_bbox_to_anchor((0.03, 0.35))
-ax.legend_._set_loc(2)
-
-# %%
 import seaborn as sns
 sns.scatterplot(data=df_combined, x="x0", y="x1", hue="source", s=0.7)
 plt.legend(loc='lower left')
+plt.title("Inferred denoised samples")
 plt.scatter(x=y_obs_onp[0], y=y_obs_onp[1], color="green")
 
 # %%

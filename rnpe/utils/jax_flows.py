@@ -29,17 +29,7 @@ def masked_transform(rng, input_dim): # TODO why num hidden 1 here but 2 above?
     return params, apply_fun
 
 
-def train_val_split(
-    key: random.PRNGKey,
-    x: np.DeviceArray,
-    train_prop: float = 0.9):
-    assert 0 <= train_prop <= 1
-    x = random.permutation(key, x)
-    n_train = round(train_prop*x.shape[0])
-    return x[0:n_train], x[n_train:]
-
-
-def count_fruitless_epochs(losses: list):
+def count_fruitless(losses: list):
     """Given a list of losses from each epoch, count the number of epochs since
     the minimum loss"""
     min_idx = np.array(losses).argmin().item()
