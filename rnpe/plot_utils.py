@@ -16,7 +16,8 @@ def pairplot(
     col_names=None,  # summary statistic names
     match_size=True,
     colors = None,
-    trim_quantile = 0.0005  # To remove big outliers that interfere with plotting
+    trim_quantile = 0.0005,  # To remove big outliers that interfere with plotting
+    dpi = 100
     ):
     if colors is None:
         colors = list(matplotlib.colors.TABLEAU_COLORS.keys())
@@ -45,7 +46,8 @@ def pairplot(
         arrays = arrays_trimmed
         assert len(arrays)
 
-    fig, axs = plt.subplots(dim, dim)
+    fig, axs = plt.subplots(dim, dim, dpi=dpi)
+    
     
     for j in range(dim):
         for i in range(dim):

@@ -13,6 +13,40 @@ def horseshoe_denoiser_model(y_obs, gaussian_noise_transfrom, tau_prior_scale, m
     numpyro.sample("y", dist.Normal(x, scales), obs=y_obs)
 
 
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+def horseshoe_denoiser_model_st(y_obs, gaussian_noise_transfrom, nu_lam=5, nu_tau=5):
+    "params and inverse transform for jax flow."
+    dim = jnp.shape(y_obs)[0]
+
+    lambdas = numpyro.sample("lambdas", dist.StudentT(nu_lam, 0, jnp.ones(dim)))
+    tau = numpyro.sample("tau", dist.StudentT(nu_tau, 0, 1))
+
+    scales = lambdas * tau
+    z = numpyro.sample("z", dist.Normal(jnp.zeros(dim), 1))  # Base dist
+    x = numpyro.deterministic("x", gaussian_noise_transfrom(z))  # Transform
+    numpyro.sample("y", dist.Normal(x, scales), obs=y_obs)
+
+#
+# Tried students t instead of lambdas
+# Tried fixing tau
+
+
 # def spike_and_slab_denoiser_model(y_obs, gaussian_noise_transfrom, probs=None):
 #     dim = jnp.shape(y_obs)[0]
 #     if probs is None:
