@@ -1,0 +1,14 @@
+name: rnpe_env
+channels:
+  - defaults
+  - conda-forge
+dependencies:
+  - python=3.9
+  - pip
+  - numpy
+  - matplotlib
+  - ipykernel
+  - numpyro
+  - jupyterlab
+  - pip:
+    - git+https://github.com/danielward27/flowjax.git

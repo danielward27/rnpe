@@ -16,10 +16,11 @@ def pairplot(
     col_names=None,  # summary statistic names
     match_size=True,
     colors=None,
-    trim_quantile=0.0005,  # To remove big outliers that interfere with plotting
+    trim_quantile=0.0005,  # remove big outliers that may interfere with plotting
     dpi=100,
     show_x_axis=False,
     legend_y_adjust=0.02,
+    alpha=0.2,
 ):
     if colors is None:
         colors = list(matplotlib.colors.TABLEAU_COLORS.keys())
@@ -41,7 +42,7 @@ def pairplot(
 
     if trim_quantile:
         stacked = np.concatenate(arrays)
-        l = (np.quantile(stacked, trim_quantile, axis=0),)
+        l = np.quantile(stacked, trim_quantile, axis=0)
         u = np.quantile(stacked, 1 - trim_quantile, axis=0)
         arrays_trimmed = [_trim(a, l, u) for a in arrays]
         arrays = arrays_trimmed
@@ -64,7 +65,11 @@ def pairplot(
                             ax.axvline(true[i], color=colors[-1])
                     else:
                         ax.scatter(
-                            a[:, j], a[:, i], s=array_point_size, alpha=0.1, color=color
+                            a[:, j],
+                            a[:, i],
+                            s=array_point_size,
+                            alpha=alpha,
+                            color=color,
                         )
                         if true is not None:
                             ax.scatter(
@@ -115,4 +120,3 @@ def _get_manual_legend(labels, colors):
         for label, color in zip(labels, colors)
     ]
     return legend_elements
-
