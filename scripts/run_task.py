@@ -12,7 +12,7 @@ import argparse
 import os
 
 # Example command from project root directory:
-# python -m scripts.run_task --task-name="sirsde" --seed="1"
+# python -m scripts.run_task --task-name="fraziergaussian" --seed=1
 
 
 class Timer:
