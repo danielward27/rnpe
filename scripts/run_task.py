@@ -77,7 +77,7 @@ def main(args):
         kernel,
         num_warmup=args.mcmc_warmup,
         num_samples=args.mcmc_samples,
-        progress_bar=False,
+        progress_bar=args.show_progress,
     )
 
     key, mcmc_key = random.split(key)
@@ -139,6 +139,7 @@ if __name__ == "__main__":
     parser.add_argument("--max-epochs", default=50, type=int)
     parser.add_argument("--mcmc-warmup", default=20000, type=int)
     parser.add_argument("--mcmc-samples", default=100000, type=int)
+    parser.add_argument("--show-progress", action="store_true")
     args = parser.parse_args()
 
     if args.results_dir is None:
