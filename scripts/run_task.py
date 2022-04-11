@@ -4,14 +4,14 @@ import jax.numpy as jnp
 from jax import random
 from numpyro.infer import MCMC, HMC, MixedHMC, init_to_value
 from rnpe.denoise import spike_and_slab_denoiser
-from rnpe.tasks import SIRSDE
+from rnpe.tasks import SIRSDE, FrazierGaussian
 from time import time
 from jax.scipy.special import logsumexp
 import pickle
 import argparse
 import os
 
-# Example command:
+# Example command from project root directory:
 # python -m scripts.run_task --task-name="sirsde" --seed="1"
 
 
@@ -37,7 +37,7 @@ def main(args):
     # Carry out simulations
     tasks = {
         "sirsde": SIRSDE,
-        # "frazier_gaussian": FrazierGaussian
+        "fraziergaussian": FrazierGaussian,
     }
     task = tasks[args.task_name]()
     key, subkey = random.split(random.PRNGKey(args.seed))

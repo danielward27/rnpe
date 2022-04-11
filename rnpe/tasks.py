@@ -13,41 +13,34 @@ class Task(ABC):
 
     @abstractmethod
     def sample_prior(self, key: random.PRNGKey, n: int):
+        "Draw n samples from the prior."
         pass
 
     @abstractmethod
     def simulate(self, key: random.PRNGKey, theta: jnp.ndarray):
+        "Carry out simulations."
         pass
 
     @abstractmethod
-    def misspecify(self, x):
-        "Misspecification to apply to pseudo-observed data (prior to summarising)."
-        pass
-
-    @abstractmethod
-    def summarise(self, x):
+    def generate_observation(self, key: random.PRNGKey):
+        "Generate misspecified pseudo-observed data. Returns (theta_true, y)."
         pass
 
     def generate_dataset(self, key: random.PRNGKey, n: int, scale=True):
-        "Generate scaled dataset with pseudo-observed value and simulations"
-        theta_key, x_key = random.split(key)
-        theta = self.sample_prior(theta_key, n + 1)
-        x = self.simulate(x_key, theta, summarise=False)
-        y, x = jax.numpy.split(x, jnp.array([1]), axis=0)
-        theta_true, theta = jax.numpy.split(theta, jnp.array([1]), axis=0)
-
-        y = self.misspecify(y)
-        x = self.summarise(x)
-        y = self.summarise(y)
+        "Generate optionally scaled dataset with pseudo-observed value and simulations"
+        theta_key, x_key, obs_key = random.split(key, 3)
+        theta = self.sample_prior(theta_key, n)
+        x = self.simulate(x_key, theta)
+        theta_true, y = self.generate_observation(obs_key)
 
         if scale:
             theta, theta_true, x, y = self.scale(theta, theta_true, x, y)
 
         data = {
             "theta": theta,
-            "theta_true": jnp.squeeze(theta_true),
+            "theta_true": theta_true,
             "x": x,
-            "y": jnp.squeeze(y),
+            "y": y,
         }
 
         return data
@@ -67,8 +60,8 @@ class Task(ABC):
 
 class SIRSDE(Task):
     """Prior is uniform within triangle with vertices [(0,0), (0,0.5), (0.5,
-    0.5)] such that beta > gamma. Note this example will take a minute or two to
-    compile."""
+    0.5)] such that beta > gamma. Note this example requires julia, and 
+    may take a minute or two to compile."""
 
     def __init__(self, julia_env_path=".", misspecify_multiplier=0.95):
         self.julia_env_path = julia_env_path
@@ -116,8 +109,7 @@ class SIRSDE(Task):
 
         return x
 
-    @staticmethod
-    def summarise(x):
+    def summarise(self, x):
         @jax.jit
         @jax.vmap
         def autocorr_lag1(x):
@@ -146,35 +138,60 @@ class SIRSDE(Task):
         summaries = jnp.column_stack(summaries)
         return summaries
 
+    def generate_observation(self, key: random.PRNGKey):
+        theta_key, y_key = random.split(key)
+        theta_true = self.sample_prior(theta_key, 1)
+        y = self.simulate(y_key, theta_true, summarise=False)
+        y = self.misspecify(y)
+        y = self.summarise(y)
+        return theta_true[0, :], y[0, :]
+
     def misspecify(self, x):
         x = onp.array(x)
         x = x.copy()
-        days = ["saturday", "sunday", "monday"]
-        sat_idx, sun_idx, mon_idx = [self.get_day_idx([d]) for d in days]
-        mon_idx = mon_idx[1:]
+        sat_idx, sun_idx, mon_idx = [range(i, 365, 7) for i in range(1, 4)]
         sat_new = x[:, sat_idx] * self.misspecify_multiplier
         sun_new = x[:, sun_idx] * self.misspecify_multiplier
         missed_cases = (x[:, sat_idx] - sat_new) + (x[:, sun_idx] - sun_new)
         mon_new = x[:, mon_idx] + missed_cases
-
         for idx, new in zip([sat_idx, sun_idx, mon_idx], [sat_new, sun_new, mon_new]):
             x[:, idx] = new
         return jnp.array(x)
 
-    @staticmethod
-    def get_day_idx(days: list):
-        weekdays = [
-            "monday",
-            "tuesday",
-            "wednesday",
-            "thursday",
-            "friday",
-            "saturday",
-            "sunday",
-        ]
-        weekdays = {day: i for i, day in enumerate(weekdays)}
-        idxs = []
-        for day in days:
-            idxs += list(range(weekdays[day], 365, 7))
-        return sorted(idxs)
 
+class FrazierGaussian(Task):
+    """Task to infer mean of Gaussian using samples, with misspecified std.
+    See https://arxiv.org/pdf/1708.01974.pdf."""
+
+    def __init__(
+        self,
+        x_raw_dim: int = 100,
+        prior_var: float = 25,
+        likelihood_var: float = 1,
+        misspecified_likeliood_var: float = 2,
+    ):
+        self.x_raw_dim = x_raw_dim
+        self.prior_var = prior_var
+        self.likelihood_var = likelihood_var
+        self.misspecified_likelihood_var = misspecified_likeliood_var
+
+    def sample_prior(self, key: random.PRNGKey, n: int):
+        return random.normal(key, (n, 1)) * jnp.sqrt(self.prior_var)
+
+    def simulate(self, key: random.PRNGKey, theta: jnp.ndarray):
+        x_demean = random.normal(key, (theta.shape[0], self.x_raw_dim)) * jnp.sqrt(
+            self.likelihood_var
+        )
+        x = x_demean + theta
+        x = jnp.column_stack((x.mean(axis=1), x.var(axis=1)))
+        return x
+
+    def generate_observation(self, key: random.PRNGKey):
+        theta_key, y_key = random.split(key)
+        theta_true = self.sample_prior(theta_key, 1)
+        y_demean = random.normal(
+            y_key, (theta_true.shape[0], self.x_raw_dim)
+        ) * jnp.sqrt(self.misspecified_likelihood_var)
+        y = y_demean + theta_true
+        y = jnp.column_stack((y.mean(axis=1), y.var(axis=1)))
+        return theta_true[0, :], y[0, :]
