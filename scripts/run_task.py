@@ -108,13 +108,12 @@ def main(args):
     denoised = mcmc.get_samples()["x"]
 
     # Calculate log probabilities of the true parameters with and without error model.
-    rep_theta_true = jnp.broadcast_to(
-        data["theta_true"], (denoised.shape[0], len(data["theta_true"]))
-    )
-
     non_robust_lp = posterior_flow.log_prob(data["theta_true"], data["y"])
 
     # Robust posterior as expectation w.r.t. q(x|y)
+    rep_theta_true = jnp.broadcast_to(
+        data["theta_true"], (denoised.shape[0], len(data["theta_true"]))
+    )
     robust_lps = posterior_flow.log_prob(rep_theta_true, denoised)
     robust_lp = logsumexp(robust_lps - jnp.log(args.mcmc_samples))
 
