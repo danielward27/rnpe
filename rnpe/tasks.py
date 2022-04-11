@@ -31,6 +31,7 @@ class Task(ABC):
         theta_key, x_key, obs_key = random.split(key, 3)
         theta = self.sample_prior(theta_key, n)
         x = self.simulate(x_key, theta)
+        x = remove_nans_and_warn(x)
         theta_true, y = self.generate_observation(obs_key)
 
         if scale:
@@ -56,6 +57,15 @@ class Task(ABC):
         x = (x - x_means) / x_stds
         y = (y - x_means) / x_stds
         return theta, theta_true, x, y
+
+
+def remove_nans_and_warn(x):
+    nan_rows = jnp.any(jnp.isnan(x), axis=1)
+    n_nan = nan_rows.sum()
+    if n_nan > 0:
+        x = x[~nan_rows]
+        print(f"Warning {n_nan} simulations contained NAN values have been removed.")
+    return x
 
 
 class SIRSDE(Task):
@@ -91,18 +101,20 @@ class SIRSDE(Task):
         tmp_x_f = f"_temp_x_{key}.npz"
         jnp.savez(tmp_theta_f, theta=theta)
 
-        # Run julia simulation script, outputing to file
         try:
+            # Run julia simulation script, outputing to file
             command = f"""
             julia --project={self.julia_env_path} {jl_script_f} --seed={key}  \
                 --theta_path={tmp_theta_f} --output_path={tmp_x_f}
             """
             os.system(command)
+            x = jnp.load(tmp_x_f)["x"]
         finally:
-            os.remove(tmp_theta_f)
-
-        x = jnp.load(tmp_x_f)["x"]
-        os.remove(tmp_x_f)
+            for f in [tmp_theta_f, tmp_x_f]:
+                try:
+                    os.remove(f)
+                except OSError:
+                    pass
 
         if summarise:
             x = self.summarise(x)

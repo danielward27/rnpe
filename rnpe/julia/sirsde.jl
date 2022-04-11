@@ -64,9 +64,8 @@ Stochastic portion of SDE (R₀ volatitility)
 function _sir_g!(du, u, p, t)
     s, i, r, R₀ = u
     (; γ, R̄₀, η, σ) = p
-    R₀ < 0 ? R₀ = 0 : R₀
     du[1:3] .= 0
-    du[4] = σ * sqrt(R₀)
+    du[4] = σ * sqrt(abs(R₀))
     return nothing
 end
 
@@ -77,7 +76,7 @@ Batched simulations using SIR model. θ has columns [β γ].
 function simulate(
     task::SIRSDETask,
     θ::AbstractMatrix{Float64})
-    @assert all(>=(0), θ)
+    @assert all(θ .>= 0)
     (; σ, η, T, sir_0, f, g, N) = task
 
     x = Array{Float64}(undef, size(θ, 1), T)  # To store infection data
