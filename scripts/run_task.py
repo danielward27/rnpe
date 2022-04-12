@@ -69,7 +69,7 @@ def main(args):
             spike_and_slab_denoiser,
             trajectory_length=1,
             init_strategy=init,
-            target_accept_prob=0.95,
+            target_accept_prob=0.99,
         )
     )
 
