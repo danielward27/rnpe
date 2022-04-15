@@ -186,6 +186,8 @@ class FrazierGaussian(Task):
         self.prior_var = prior_var
         self.likelihood_var = likelihood_var
         self.misspecified_likelihood_var = misspecified_likeliood_var
+        self.theta_names = ["mean"]
+        self.x_names = ["mean", "variance"]
 
     def sample_prior(self, key: random.PRNGKey, n: int):
         return random.normal(key, (n, 1)) * jnp.sqrt(self.prior_var)

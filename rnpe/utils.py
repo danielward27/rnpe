@@ -5,40 +5,61 @@ import matplotlib
 from matplotlib.lines import Line2D
 
 
-# TODO document
+
 def pairplot(
-    arrays,
-    true=None,
-    array_point_size=0.1,
-    true_point_size=5,
-    facet_size=5,
-    names=None,  # arrays and true names for legend
-    col_names=None,  # summary statistic names
-    match_size=True,
+    arrays: dict,
+    true: np.ndarray,
+    col_names: list = None,  # summary statistic names
+    names: list = None,  # arrays and true names for legend
+    array_point_size: float = 0.1,
+    true_point_size: float = 5,
+    facet_size: float = 5,
+    match_size: bool = True,
     colors=None,
     trim_quantile=0.0005,  # remove big outliers that may interfere with plotting
     dpi=100,
     show_x_axis=False,
     legend_y_adjust=0.02,
     alpha=0.2,
+    true_name="true",
 ):
+    """Plot a pairplot, between the different columns of each array, along with 
+    an additional true/reference point. Note this function does remove extreme
+    outliers, and matches the sizes between the arrays by default by subsampling.
+
+    Args:
+        arrays (list): dictionary with names as keys and arrays as values, with arrays matching dimension on axis 1.
+        true (np.ndarray): True/reference point.
+        array_point_size (float, optional): Point size. Defaults to 0.1.
+        true_point_size (float, optional): Point size. Defaults to 5.
+        facet_size (float, optional): Facet size. Defaults to 5.
+        colors (list, optional): Colours, list of length len(arrays) + 1 (last colour for true point).
+        trim_quantile (float, optional): Trim outliers. Defaults to 0.0005.
+        show_x_axis (bool, optional): S. Defaults to False.
+        legend_y_adjust (float, optional): Nudge legend in y axis. Defaults to 0.02.
+        alpha (float, optional): Opacity of array points. Defaults to 0.2.
+    """
     if colors is None:
         colors = list(matplotlib.colors.TABLEAU_COLORS.keys())
         colors.remove("tab:green")  # save for true
         colors = colors[: len(arrays)]
         colors.append("tab:green")
 
+    array_names = list(arrays.keys())
+    array_names.append(true_name)
+    arrays = [np.array(a) for a in arrays.values()]
+    true = np.array(true)
     dim = arrays[0].shape[1]
 
     if col_names is None:
         col_names = ["" for i in range(dim)]
-    arrays = [np.array(a) for a in arrays]
-    if true is not None:
-        true = np.array(true)
 
     if match_size:
-        min_size = min([a.shape[0] for a in arrays])
-        arrays = [a[:min_size] for a in arrays]
+        ns = [a.shape[0] for a in arrays]
+        min_size = min(ns)
+        rng = np.random.default_rng()
+        idxs = [rng.choice(np.arange(n), min_size) for n in ns]
+        arrays = [a[i] for (i, a) in zip(idxs, arrays)]
 
     if trim_quantile:
         stacked = np.concatenate(arrays)
@@ -61,8 +82,7 @@ def pairplot(
                     if i == j:
                         sns.kdeplot(a[:, i], ax=ax, color=color)
                         ax.set_ylabel("")
-                        if true is not None:
-                            ax.axvline(true[i], color=colors[-1])
+                        ax.axvline(true[i], color=colors[-1])
                     else:
                         ax.scatter(
                             a[:, j],
@@ -71,10 +91,9 @@ def pairplot(
                             alpha=alpha,
                             color=color,
                         )
-                        if true is not None:
-                            ax.scatter(
-                                true[j], true[i], s=true_point_size, color=colors[-1]
-                            )
+                        ax.scatter(
+                            true[j], true[i], s=true_point_size, color=colors[-1]
+                        )
 
             if i >= j:
                 if i == (dim - 1):
@@ -89,15 +108,14 @@ def pairplot(
         size = dim ** 0.5  # Seems reasonable default
         fig.set_size_inches(facet_size * size, facet_size * size)
 
-    if names is not None:
-        legend_elements = _get_manual_legend(names, colors)
-        plt.figlegend(
-            legend_elements,
-            names,
-            loc="lower center",
-            bbox_to_anchor=(0.5, legend_y_adjust),
-            ncol=len(names),
-        )
+    legend_elements = _get_manual_legend(array_names, colors)
+    plt.figlegend(
+        legend_elements,
+        array_names,
+        loc="lower center",
+        bbox_to_anchor=(0.5, legend_y_adjust),
+        ncol=len(array_names),
+    )
 
 
 def _trim(a, l, u):
