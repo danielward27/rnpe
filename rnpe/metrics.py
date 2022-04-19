@@ -1,4 +1,3 @@
-# %%
 import jax
 import jax.numpy as jnp
 from flowjax.flows import Flow
@@ -6,7 +5,7 @@ from jax.scipy.special import logsumexp
 from tqdm import tqdm
 
 
-# Too memory intensive alone
+# Too memory intensive
 # def robust_posterior_log_prob(flow: Flow, theta: jnp.ndarray, denoised: jnp.ndarray):
 #     """Given a flow q(theta|x), a matrix of theta, and denoised observations,
 #     evaluate the posterior probability as the expectation over denoised samples."""
@@ -16,11 +15,7 @@ from tqdm import tqdm
 
 
 def robust_posterior_log_prob(
-    flow: Flow,
-    theta: jnp.ndarray,
-    denoised: jnp.ndarray,
-    thin_denoised: int = 1,
-    show_progress=False,
+    flow: Flow, theta: jnp.ndarray, denoised: jnp.ndarray, show_progress=False,
 ):
     """Given a flow q(theta|x), a matrix of theta, and denoised observations,
     evaluate the posterior probability p(theta|y) as the expectation over
@@ -34,7 +29,7 @@ def robust_posterior_log_prob(
     probs = []
     loop = tqdm(theta) if show_progress else theta
     for theta_row in loop:
-        probs.append(_inner(theta_row, denoised[::thin_denoised]))
+        probs.append(_inner(theta_row, denoised))
 
     return jnp.array(probs)
 
@@ -54,7 +49,6 @@ def highest_posterior_density(
     robust_samples: jnp.ndarray,
     naive_samples: jnp.ndarray,
     y: jnp.ndarray,
-    thin_denoised: int = 1,
     show_progress: bool = True,
 ):
     """Monte carlo approximation to find the smallest heighest density region
@@ -62,7 +56,7 @@ def highest_posterior_density(
     (robust, non_robust).
     """
     robust_lps = robust_posterior_log_prob(
-        flow, robust_samples, denoised, thin_denoised, show_progress
+        flow, robust_samples, denoised, show_progress
     )
     naive_lps = flow.log_prob(naive_samples, y)
 
@@ -82,9 +76,26 @@ def calculate_metrics(
     robust_samples: jnp.ndarray,
     naive_samples: jnp.ndarray,
     y: jnp.ndarray,
+    thin_denoised_hpd: int = 1,
+    show_progress: bool = True,
 ):
-    """Calculate metrics (log_prob_theta_true and highest_posterior_density),
-    for robust and non-robust approaches. returns dictionary."""
+    """Calculate metrics for robust-NPE and NPE.
+
+    Args:
+        flow (Flow): Flow approximating p(theta|x)
+        theta_true (jnp.ndarray): True parameters associated with y.
+        denoised (jnp.ndarray): Denoised observations.
+        robust_samples (jnp.ndarray): Robust NPE posterior samples
+        naive_samples (jnp.ndarray): NPE posterior samples
+        y (jnp.ndarray): Observation.
+        thin_denoised_hpd (int, optional): Thinning of denoised samples when calculating
+            HPD (for computational reasons). Defaults to 1.
+        show_progress (bool): Whether to show progress bar for computing HPD.
+
+    Returns:
+        dict: Contains the log probability of the true parameters, the HPD%, and residuals
+            based on posterior means as a point esimate, for both Robust NPE and NPE
+    """
 
     theta_true_lp_robust, theta_true_lp_naive = log_prob_theta_true(
         flow, theta_true, denoised, y
@@ -92,20 +103,21 @@ def calculate_metrics(
     hpd_robust, hpd_naive = highest_posterior_density(
         flow=flow,
         theta_true=theta_true,
-        denoised=denoised,
+        denoised=denoised[::thin_denoised_hpd],
         robust_samples=robust_samples,
         naive_samples=naive_samples,
         y=y,
+        show_progress=show_progress,
     )
 
     metrics = {
-        "with error model": {
-            "prob_theta*": theta_true_lp_robust,
+        "Robust NPE": {
+            "log_prob_theta*": theta_true_lp_robust,
             "hpd": hpd_robust,
             "point_estimate_residuals": robust_samples.mean(axis=0) - theta_true,
         },
-        "without error model": {
-            "prob_theta*": theta_true_lp_naive,
+        "NPE": {
+            "log_prob_theta*": theta_true_lp_naive,
             "hpd": hpd_naive,
             "point_estimate_residuals": naive_samples.mean(axis=0) - theta_true,
         },

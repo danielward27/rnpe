@@ -120,10 +120,11 @@ def main(args):
     metrics = calculate_metrics(
         flow=posterior_flow,
         theta_true=data["theta_true"],
-        denoised=denoised[::10],  # Thin for computational reasons.
+        denoised=denoised,
         robust_samples=robust_posterior_samples,
         naive_samples=naive_posterior_samples,
         y=data["y"],
+        thin_denoised_hpd=10,  # Thin for computational reasons.
     )
 
     timer.stop()
@@ -133,8 +134,8 @@ def main(args):
         "mcmc_samples": mcmc.get_samples(),
         "metrics": metrics,
         "posterior_samples": {
-            "with error model": robust_posterior_samples,
-            "without error model": naive_posterior_samples,
+            "Robust NPE": robust_posterior_samples,
+            "NPE": naive_posterior_samples,
         },
         "runtimes": timer.results,
         "names": {"x": task.x_names, "theta": task.theta_names},

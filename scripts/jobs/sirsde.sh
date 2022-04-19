@@ -6,7 +6,7 @@
 #SBATCH --output=/user/work/dw16200/rnpe/logs/%x.%j.out
 #SBATCH --time=0:59:59
 #SBATCH --mem=8GB
-#SBATCH --array=1000-1005
+#SBATCH --array=0-1100
 
 # Example submission: sbatch scripts/jobs/sirsde.sh
 

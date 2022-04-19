@@ -5,12 +5,10 @@ import matplotlib
 from matplotlib.lines import Line2D
 
 
-
 def pairplot(
     arrays: dict,
     true: np.ndarray,
     col_names: list = None,  # summary statistic names
-    names: list = None,  # arrays and true names for legend
     array_point_size: float = 0.1,
     true_point_size: float = 5,
     facet_size: float = 5,
@@ -30,6 +28,7 @@ def pairplot(
     Args:
         arrays (list): dictionary with names as keys and arrays as values, with arrays matching dimension on axis 1.
         true (np.ndarray): True/reference point.
+        col_names (list): list of names corresponding the columns of each array (e.g. summary statistics).
         array_point_size (float, optional): Point size. Defaults to 0.1.
         true_point_size (float, optional): Point size. Defaults to 5.
         facet_size (float, optional): Facet size. Defaults to 5.
