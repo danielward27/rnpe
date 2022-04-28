@@ -9,8 +9,8 @@ def pairplot(
     arrays: dict,
     true: np.ndarray,
     col_names: list = None,  # summary statistic names
-    array_point_size: float = 0.1,
-    true_point_size: float = 5,
+    array_point_size: float = 0.4,
+    true_point_size: float = 20,
     facet_size: float = 5,
     match_size: bool = True,
     colors=None,

@@ -4,7 +4,7 @@ import jax.numpy as jnp
 from jax import random
 from numpyro.infer import MCMC, HMC, MixedHMC, init_to_value
 from rnpe.denoise import spike_and_slab_denoiser
-from rnpe.tasks import SIRSDE, FrazierGaussian
+from rnpe.tasks import SIRSDE, FrazierGaussian, Cancer
 from rnpe.metrics import calculate_metrics
 from time import time
 import pickle
@@ -38,6 +38,7 @@ def main(args):
     tasks = {
         "sirsde": SIRSDE,
         "fraziergaussian": FrazierGaussian,
+        "cancer": Cancer
     }
     task = tasks[args.task_name]()
     key, subkey = random.split(random.PRNGKey(args.seed))
@@ -101,6 +102,7 @@ def main(args):
         data["x"],
         max_epochs=args.max_epochs,
         learning_rate=0.0005,
+        show_progress=args.show_progress,
     )
     timer.stop()
 
@@ -139,6 +141,7 @@ def main(args):
         },
         "runtimes": timer.results,
         "names": {"x": task.x_names, "theta": task.theta_names},
+        "scales": task.scales,
     }
 
     with open(f"{args.results_dir}/{args.seed}.pickle", "wb") as f:

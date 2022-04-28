@@ -33,26 +33,4 @@ def test_robust_posterior_log_prob():
 
 test_robust_posterior_log_prob()
 
-
-#%%
-from jax import random
-from flowjax.flows import NeuralSplineFlow
-import jax.numpy as jnp
-from rnpe.metrics import robust_posterior_log_prob
-
-num_denoised = 500
-num_posterior_samps = 500
-key, subkey = random.split(random.PRNGKey(0))
-flow = NeuralSplineFlow(subkey, 2, 3)
-key, subkey = random.split(key)
-denoised = random.normal(subkey, (num_denoised, 3))
-
-key, subkey = random.split(key)
-
-theta = random.normal(subkey, (num_posterior_samps, 2))
-# %%
-%%time
-result = robust_posterior_log_prob(flow, theta, denoised)
-
-
 # %%
