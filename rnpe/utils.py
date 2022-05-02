@@ -20,6 +20,7 @@ def pairplot(
     legend_y_adjust=0.02,
     alpha=0.2,
     true_name="true",
+    exclude_diag=False,
 ):
     """Plot a pairplot, between the different columns of each array, along with 
     an additional true/reference point. Note this function does remove extreme
@@ -37,6 +38,7 @@ def pairplot(
         show_x_axis (bool, optional): S. Defaults to False.
         legend_y_adjust (float, optional): Nudge legend in y axis. Defaults to 0.02.
         alpha (float, optional): Opacity of array points. Defaults to 0.2.
+        exclude_diag: (bool): Option to exlude density plots along diagonal.
     """
     if colors is None:
         colors = list(matplotlib.colors.TABLEAU_COLORS.keys())
@@ -89,6 +91,8 @@ def pairplot(
                             s=array_point_size,
                             alpha=alpha,
                             color=color,
+                            edgecolors="none",
+                            rasterized=True,
                         )
                         ax.scatter(
                             true[j], true[i], s=true_point_size, color=colors[-1]
@@ -115,6 +119,7 @@ def pairplot(
         bbox_to_anchor=(0.5, legend_y_adjust),
         ncol=len(array_names),
     )
+    return fig
 
 
 def _trim(a, l, u):

@@ -224,8 +224,6 @@ class Cancer(Task):
         self.x_names = [
             "N Cancer",
             "N Stromal",
-            "Mean Dist",
-            "Median Dist",
             "Mean Min Dist",
             "Max Min Dist",
         ]
@@ -295,14 +293,17 @@ class Cancer(Task):
         """Calculate summary statistics, threshold_n_stromal limits the number
         of stromal cells (trade off for efficiency)."""
         num_cancer = is_cancer.sum()
+
+        if num_cancer == is_cancer.shape[0]:
+            print("Warning, no stromal cells. Returning nan for summary statistics.")
+            return jnp.full(len(self.x_names), jnp.nan)
+
         num_stromal = (~is_cancer).sum()
         threshold_num_stromal = min(threshold_n_stromal, num_stromal)
         cancer = cells[is_cancer]
         stromal = cells[~is_cancer][:threshold_num_stromal]
 
         dists = dists_between(stromal, cancer)
-        median_dist = onp.median(dists)
-        mean_dist = dists.mean()
         min_dists = dists.min(axis=1)
         mean_nearest_cancer = min_dists.mean()
         max_nearest_cancer = min_dists.max()
@@ -310,11 +311,10 @@ class Cancer(Task):
         summaries = [
             num_cancer,
             num_stromal,
-            median_dist,
-            mean_dist,
             mean_nearest_cancer,
             max_nearest_cancer,
         ]
+
         return jnp.array(summaries)
 
     def generate_observation(self, key: random.PRNGKey):
