@@ -35,11 +35,7 @@ class Timer:
 def main(args):
 
     #### Carry out simulations ####
-    tasks = {
-        "sirsde": SIRSDE,
-        "fraziergaussian": FrazierGaussian,
-        "cancer": Cancer
-    }
+    tasks = {"sirsde": SIRSDE, "fraziergaussian": FrazierGaussian, "cancer": Cancer}
     task = tasks[args.task_name]()
     key, subkey = random.split(random.PRNGKey(args.seed))
 
@@ -91,7 +87,7 @@ def main(args):
     key, flow_key, train_key = random.split(key, 3)
 
     posterior_flow = NeuralSplineFlow(
-        flow_key, target_dim=data["theta"].shape[1], condition_dim=data["x"].shape[1]
+        flow_key, target_dim=data["theta"].shape[1], condition_dim=data["x"].shape[1],
     )
 
     timer.start("q(theta|x)_training")

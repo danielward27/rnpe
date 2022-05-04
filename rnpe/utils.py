@@ -18,8 +18,9 @@ def pairplot(
     show_x_axis=False,
     legend_y_adjust=0.02,
     alpha=0.2,
-    true_name="true",
+    true_name="True",
     legend_kws: dict = {},
+    legend: bool = True,
 ):
     """Plot a pairplot, between the different columns of each array, along with 
     an additional true/reference point. Note this function does remove extreme
@@ -107,15 +108,16 @@ def pairplot(
                 ax.xaxis.set_ticklabels([])
                 ax.yaxis.set_ticklabels([])
 
-    legend_elements = get_manual_legend(array_names, colors)
-    plt.figlegend(
-        legend_elements,
-        array_names,
-        loc="lower center",
-        bbox_to_anchor=(0.5, legend_y_adjust),
-        ncol=len(array_names),
-        **legend_kws
-    )
+    if legend:
+        legend_elements = get_manual_legend(array_names, colors)
+        plt.figlegend(
+            legend_elements,
+            array_names,
+            loc="lower center",
+            bbox_to_anchor=(0.5, legend_y_adjust),
+            ncol=len(array_names),
+            **legend_kws
+        )
     return fig
 
 

@@ -280,7 +280,7 @@ class Cancer(Task):
             has_necrosis = onp.random.binomial(1, p=0.75, size=(num_cancer_parents,))
             has_necrosis = has_necrosis.astype(bool)
             if has_necrosis.sum() > 0:
-                bl_array = dists[:, has_necrosis] < (radii[has_necrosis] * 0.75)
+                bl_array = dists[:, has_necrosis] < (radii[has_necrosis] * 0.8)
                 necrotized = onp.any(bl_array, axis=1)
                 cells, is_cancer = (
                     cells[~necrotized],
