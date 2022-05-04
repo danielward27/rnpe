@@ -96,7 +96,7 @@ class SIRSDE(Task):
     def sample_prior(self, key: random.PRNGKey, n: int):
         u1key, u2key = random.split(key)
         x = jnp.sqrt(random.uniform(u1key, (n,))) / 2
-        y = (random.uniform(u2key, (n,)) * x) / 2
+        y = random.uniform(u2key, (n,)) * x
         return jnp.column_stack((x, y))
 
     def simulate(self, key: random.PRNGKey, theta: jnp.ndarray, summarise=True):

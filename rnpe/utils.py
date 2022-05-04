@@ -11,7 +11,6 @@ def pairplot(
     col_names: list = None,  # summary statistic names
     array_point_size: float = 0.4,
     true_point_size: float = 20,
-    facet_size: float = 5,
     match_size: bool = True,
     colors=None,
     trim_quantile=0.0005,  # remove big outliers that may interfere with plotting
@@ -20,7 +19,7 @@ def pairplot(
     legend_y_adjust=0.02,
     alpha=0.2,
     true_name="true",
-    exclude_diag=False,
+    legend_kws: dict = {},
 ):
     """Plot a pairplot, between the different columns of each array, along with 
     an additional true/reference point. Note this function does remove extreme
@@ -108,16 +107,14 @@ def pairplot(
                 ax.xaxis.set_ticklabels([])
                 ax.yaxis.set_ticklabels([])
 
-        size = dim ** 0.5  # Seems reasonable default
-        fig.set_size_inches(facet_size * size, facet_size * size)
-
-    legend_elements = _get_manual_legend(array_names, colors)
+    legend_elements = get_manual_legend(array_names, colors)
     plt.figlegend(
         legend_elements,
         array_names,
         loc="lower center",
         bbox_to_anchor=(0.5, legend_y_adjust),
         ncol=len(array_names),
+        **legend_kws
     )
     return fig
 
@@ -128,13 +125,14 @@ def _trim(a, l, u):
     return a
 
 
-def _get_manual_legend(labels, colors):
+def get_manual_legend(labels, colors, marker="o"):
+    assert marker in ["o", "_"]
     legend_elements = [  # Manual legend to avoid small points in legend
         Line2D(
             [0],
             [0],
-            marker="o",
-            color="w",
+            marker=marker,
+            color=color if marker == "_" else "w",
             label=label,
             markerfacecolor=color,
             markersize=8,
