@@ -222,8 +222,8 @@ class Cancer(Task):
     def __init__(self):
         self.theta_names = ["Cancer Parent Rate", "Cancer Daughter Rate", "Cell Rate"]
         self.x_names = [
-            "N Cancer",
             "N Stromal",
+            "N Cancer",
             "Mean Min Dist",
             "Max Min Dist",
         ]
@@ -304,13 +304,14 @@ class Cancer(Task):
         stromal = cells[~is_cancer][:threshold_num_stromal]
 
         dists = dists_between(stromal, cancer)
+
         min_dists = dists.min(axis=1)
         mean_nearest_cancer = min_dists.mean()
         max_nearest_cancer = min_dists.max()
 
         summaries = [
-            num_cancer,
             num_stromal,
+            num_cancer,
             mean_nearest_cancer,
             max_nearest_cancer,
         ]

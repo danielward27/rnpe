@@ -50,7 +50,7 @@ def main(args):
     x_flow = BlockNeuralAutoregressiveFlow(flow_key, target_dim=data["x"].shape[1])
 
     timer.start("q(x)_training")
-    x_flow, _ = train_flow(
+    x_flow, x_losses = train_flow(
         train_key, x_flow, data["x"], learning_rate=0.01, max_epochs=args.max_epochs
     )
     timer.stop()
@@ -91,7 +91,7 @@ def main(args):
     )
 
     timer.start("q(theta|x)_training")
-    posterior_flow, _ = train_flow(
+    posterior_flow, npe_losses = train_flow(
         train_key,
         posterior_flow,
         data["theta"],
@@ -115,6 +115,7 @@ def main(args):
 
     #### Calculate metrics ####
     key, subkey = random.split(key)
+
     metrics = calculate_metrics(
         flow=posterior_flow,
         theta_true=data["theta_true"],
@@ -138,6 +139,7 @@ def main(args):
         "runtimes": timer.results,
         "names": {"x": task.x_names, "theta": task.theta_names},
         "scales": task.scales,
+        "losses": {"x": x_losses, "theta|x": npe_losses},
     }
 
     with open(f"{args.results_dir}/{args.seed}.pickle", "wb") as f:
@@ -146,9 +148,11 @@ def main(args):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Robust NPE")
-    parser.add_argument("--task-name", type=str)
+    parser.add_argument(
+        "--task-name", type=str, help="fraziergaussian, sirsde or cancer"
+    )
     parser.add_argument("--seed", type=int)
-    parser.add_argument("--results-dir")
+    parser.add_argument("--results-dir", help="defaults to results/task_name")
     parser.add_argument("--n-sim", default=50000, type=int)
     parser.add_argument("--max-epochs", default=50, type=int)
     parser.add_argument("--mcmc-warmup", default=20000, type=int)
