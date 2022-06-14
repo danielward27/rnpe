@@ -10,7 +10,7 @@ import numba
 class Task(ABC):
     @property
     def name(self):
-        return type(self).__name__.lower()
+        return type(self).__name__
 
     @abstractmethod
     def sample_prior(self, key: random.PRNGKey, n: int):
@@ -75,23 +75,22 @@ def remove_nans_and_warn(x):
     return x
 
 
-class SIRSDE(Task):
-    """Prior is uniform within triangle with vertices [(0,0), (0,
-    0.5), (0,0.5)] such that beta > gamma. Note this example requires julia, and 
-    may take a minute or two to compile."""
+class SIR(Task):
+    """Prior is uniform [0, 0.5] with constraint such that beta > gamma. Note
+    this example requires julia, and may take a minute or two to compile."""
 
     def __init__(self, julia_env_path=".", misspecify_multiplier=0.95):
         self.julia_env_path = julia_env_path
         self.misspecify_multiplier = misspecify_multiplier
         self.x_names = [
-            "log_mean",
-            "log_median",
-            "log_max_infections",
-            "log_max_infections_day",
-            "log_half_total_reached_at",
-            "autocor_lag1",
+            "Mean",     # Mean infections
+            "Median",   # Median infections
+            "Max",      # Max infections
+            "Max Day",  # Day of max infections
+            "Half Day", # Day where half of cumulative total number of infections reached
+            "Autocor",  # Autocorrelation lag 1
         ]
-        self.theta_names = ["beta", "gamma"]
+        self.theta_names = [r"$\beta$", r"$\gamma$"]
 
     def sample_prior(self, key: random.PRNGKey, n: int):
         u1key, u2key = random.split(key)
@@ -103,7 +102,7 @@ class SIRSDE(Task):
         "Simulates 365 days of sir model."
         key = key[1].item()
         # temporarily save parameters to file to be accessed from julia
-        jl_script_f = os.path.dirname(os.path.realpath(__file__)) + "/julia/sirsde.jl"
+        jl_script_f = os.path.dirname(os.path.realpath(__file__)) + "/julia/SIR.jl"
         tmp_theta_f = f"_temp_theta_{key}.npz"
         tmp_x_f = f"_temp_x_{key}.npz"
         jnp.savez(tmp_theta_f, theta=theta)
@@ -148,8 +147,8 @@ class SIRSDE(Task):
         summaries = [
             jnp.log(x.mean(axis=1)),
             jnp.log(jnp.median(x, axis=1)),
-            jnp.log(jnp.argmax(x, axis=1) + 1),  # +1 incase 0 is max_day
             jnp.log(jnp.max(x, axis=1)),
+            jnp.log(jnp.argmax(x, axis=1) + 1),  # +1 incase 0 is max_day
             jnp.log(cumulative_day(x, 0.5)),
             autocorr_lag1(x),
         ]
@@ -178,7 +177,7 @@ class SIRSDE(Task):
         return jnp.array(x)
 
 
-class FrazierGaussian(Task):
+class Gaussian(Task):
     """Task to infer mean of Gaussian using samples, with misspecified std.
     See https://arxiv.org/pdf/1708.01974.pdf."""
 
@@ -193,8 +192,8 @@ class FrazierGaussian(Task):
         self.prior_var = prior_var
         self.likelihood_var = likelihood_var
         self.misspecified_likelihood_var = misspecified_likeliood_var
-        self.theta_names = ["mean"]
-        self.x_names = ["mean", "variance"]
+        self.theta_names = [r"$\mu$"]
+        self.x_names = [r"$\mu$", r"$\sigma^2$"]
 
     def sample_prior(self, key: random.PRNGKey, n: int):
         return random.normal(key, (n, 1)) * jnp.sqrt(self.prior_var)
@@ -218,9 +217,9 @@ class FrazierGaussian(Task):
         return theta_true[0, :], y[0, :]
 
 
-class Cancer(Task):
+class CS(Task):
     def __init__(self):
-        self.theta_names = ["Cancer Parent Rate", "Cancer Daughter Rate", "Cell Rate"]
+        self.theta_names = [r"$\lambda_c$", r"$\lambda_p$", r"$\lambda_d$"]
         self.x_names = [
             "N Stromal",
             "N Cancer",
@@ -338,7 +337,6 @@ class Cancer(Task):
         min_d = d_sorted[n_points, onp.arange(dists.shape[1])]
         return min_d
 
-
 @numba.njit(fastmath=True)
 def dists_between(a, b):
     "Returns a.shape[0] by b.shape[0] l2 norms between rows of arrays."
@@ -347,4 +345,3 @@ def dists_between(a, b):
         for bi in b:
             dists.append(onp.linalg.norm(ai - bi))
     return onp.array(dists).reshape(a.shape[0], b.shape[0])
-

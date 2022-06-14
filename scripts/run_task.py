@@ -4,7 +4,7 @@ import jax.numpy as jnp
 from jax import random
 from numpyro.infer import MCMC, HMC, MixedHMC, init_to_value
 from rnpe.denoise import spike_and_slab_denoiser
-from rnpe.tasks import SIRSDE, FrazierGaussian, Cancer
+from rnpe.tasks import SIR, Gaussian, CS
 from rnpe.metrics import calculate_metrics
 from time import time
 import pickle
@@ -12,7 +12,7 @@ import argparse
 import os
 
 # Example command from project root directory:
-# python -m scripts.run_task --task-name="fraziergaussian" --seed=0
+# python -m scripts.run_task --task-name="Gaussian" --seed=0
 
 
 class Timer:
@@ -31,11 +31,24 @@ class Timer:
         print(f"{self.label}: {elapsed:.2f}s")
         self.results[self.label] = elapsed
 
+def rescale_results(res):
+    x_mean, x_std = res["scales"]["x_mean"], res["scales"]["x_std"]
+    theta_mean, theta_std = res["scales"]["theta_mean"], res["scales"]["theta_std"]
+
+    res["data"]["x"] = res["data"]["x"] * x_std + x_mean
+    res["data"]["y"] = res["data"]["y"] * x_std + x_mean
+    res["data"]["theta"] = res["data"]["theta"] * theta_std + theta_mean
+    res["data"]["theta_true"] = res["data"]["theta_true"] * theta_std + theta_mean
+    res["mcmc_samples"]["x"] = res["mcmc_samples"]["x"] * x_std + x_mean
+
+    res["posterior_samples"]["NPE"] = res["posterior_samples"]["NPE"] * theta_std + theta_mean
+    res["posterior_samples"]["Robust NPE"] = res["posterior_samples"]["Robust NPE"] * theta_std + theta_mean
+    return res
 
 def main(args):
 
     #### Carry out simulations ####
-    tasks = {"sirsde": SIRSDE, "fraziergaussian": FrazierGaussian, "cancer": Cancer}
+    tasks = {"SIR": SIR, "Gaussian": Gaussian, "CS": CS}
     task = tasks[args.task_name]()
     key, subkey = random.split(random.PRNGKey(args.seed))
 
@@ -51,7 +64,7 @@ def main(args):
 
     timer.start("q(x)_training")
     x_flow, x_losses = train_flow(
-        train_key, x_flow, data["x"], learning_rate=0.01, max_epochs=args.max_epochs
+        train_key, x_flow, data["x"], learning_rate=0.01, max_epochs=args.max_epochs, show_progress=args.show_progress
     )
     timer.stop()
 
@@ -77,10 +90,14 @@ def main(args):
     )
 
     key, mcmc_key = random.split(key)
-    model_args = [data["y"], x_flow]
+    model_kwargs = {
+        "y_obs": data["y"],
+        "flow": x_flow,
+        "slab_scale": args.slab_scale
+        }
 
     timer.start("q(x|y)_sampling")
-    mcmc.run(mcmc_key, *model_args)
+    mcmc.run(mcmc_key, **model_kwargs)
     timer.stop()
 
     # Carry out posterior inference
@@ -124,6 +141,7 @@ def main(args):
         naive_samples=naive_posterior_samples,
         y=data["y"],
         thin_denoised_hpd=10,  # Thin for computational reasons.
+        show_progress=args.show_progress
     )
 
     timer.stop()
@@ -142,14 +160,16 @@ def main(args):
         "losses": {"x": x_losses, "theta|x": npe_losses},
     }
 
-    with open(f"{args.results_dir}/{args.seed}.pickle", "wb") as f:
+    results = rescale_results(results)
+
+    with open(f"{args.results_dir}/{args.seed}_{args.slab_scale}.pickle", "wb") as f:
         pickle.dump(results, f)
 
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Robust NPE")
     parser.add_argument(
-        "--task-name", type=str, help="fraziergaussian, sirsde or cancer"
+        "--task-name", type=str, help="Gaussian, SIR or cancer"
     )
     parser.add_argument("--seed", type=int)
     parser.add_argument("--results-dir", help="defaults to results/task_name")
@@ -159,6 +179,8 @@ if __name__ == "__main__":
     parser.add_argument("--mcmc-samples", default=100000, type=int)
     parser.add_argument("--posterior-samples", default=10000, type=int)
     parser.add_argument("--show-progress", action="store_true")
+    parser.add_argument("--slab-scale", default=0.25, type=float)
+
     args = parser.parse_args()
 
     assert args.posterior_samples <= args.mcmc_samples
@@ -169,3 +191,4 @@ if __name__ == "__main__":
     assert os.path.isdir(args.results_dir)
 
     main(args)
+

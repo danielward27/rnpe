@@ -15,8 +15,8 @@ def pairplot(
     colors=None,
     trim_quantile=0.0005,  # remove big outliers that may interfere with plotting
     dpi=100,
-    show_x_axis=False,
-    legend_y_adjust=0.02,
+    show_x_axis: bool = False,
+    legend_pos: tuple = (0.8, 0.8),
     alpha=0.2,
     true_name="True",
     legend_kws: dict = {},
@@ -36,9 +36,8 @@ def pairplot(
         colors (list, optional): Colours, list of length len(arrays) + 1 (last colour for true point).
         trim_quantile (float, optional): Trim outliers. Defaults to 0.0005.
         show_x_axis (bool, optional): S. Defaults to False.
-        legend_y_adjust (float, optional): Nudge legend in y axis. Defaults to 0.02.
+        legend_pos (tuple, optional): Change legend position.
         alpha (float, optional): Opacity of array points. Defaults to 0.2.
-        exclude_diag: (bool): Option to exlude density plots along diagonal.
     """
     if colors is None:
         colors = list(matplotlib.colors.TABLEAU_COLORS.keys())
@@ -111,12 +110,7 @@ def pairplot(
     if legend:
         legend_elements = get_manual_legend(array_names, colors)
         plt.figlegend(
-            legend_elements,
-            array_names,
-            loc="lower center",
-            bbox_to_anchor=(0.5, legend_y_adjust),
-            ncol=len(array_names),
-            **legend_kws
+            legend_elements, array_names, bbox_to_anchor=legend_pos, **legend_kws
         )
     return fig
 

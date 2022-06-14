@@ -5,7 +5,7 @@ Using conda, from the project root directory, the required python packages can b
 conda env create -f environment.yml --name rnpe_env
 ```
 
-The SIRSDE example requires julia to be installed. The required julia packages can be downloaded using the Julia package REPL by running 
+The SIR example requires julia to be installed. The required julia packages can be downloaded using the Julia package REPL by running 
 ```
 pkg> activate .
 pkg> instantiate

@@ -10,5 +10,6 @@ dependencies:
   - ipykernel
   - numpyro
   - jupyterlab
+  - numba
   - pip:
-    - git+https://github.com/danielward27/flowjax.git
+    - flowjax

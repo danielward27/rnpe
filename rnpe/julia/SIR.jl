@@ -1,4 +1,4 @@
-# Contains script to run SIRSDE model using command line.
+# Contains script to run SIR model using command line.
 
 using LinearAlgebra
 using StochasticDiffEq
@@ -24,7 +24,7 @@ using ArgParse
 SIR model described using stochastic differential equations.
 Ref: Inspired by https://julia.quantecon.org/continuous_time/covid_sde.html
 """
-@kwdef struct SIRSDETask
+@kwdef struct SIRTask
     "Volatitility of R₀."
     σ::Float64 = 0.05
     "Mean reversion strength of R₀."
@@ -41,7 +41,7 @@ Ref: Inspired by https://julia.quantecon.org/continuous_time/covid_sde.html
     g::Function = _sir_g!
     "Parameter names."
     θ_names::Vector{String} = ["β", "γ"]
-    name::String = "SIRSDE"
+    name::String = "SIR"
 end
 
 """
@@ -74,7 +74,7 @@ end
 Batched simulations using SIR model. θ has columns [β γ].
 """
 function simulate(
-    task::SIRSDETask,
+    task::SIRTask,
     θ::AbstractMatrix{Float64})
     @assert all(θ .>= 0)
     (; σ, η, T, sir_0, f, g, N) = task
@@ -124,7 +124,7 @@ function main()
     Random.seed!(args["seed"])
     θ = npzread(args["theta_path"])["theta"]
     θ = convert(Matrix{Float64}, θ)
-    task = SIRSDETask()
+    task = SIRTask()
     x = simulate(task, θ)
     npzwrite(args["output_path"], x=x)
 end
