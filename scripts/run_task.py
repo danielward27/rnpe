@@ -42,7 +42,7 @@ def rescale_results(res):
     res["mcmc_samples"]["x"] = res["mcmc_samples"]["x"] * x_std + x_mean
 
     res["posterior_samples"]["NPE"] = res["posterior_samples"]["NPE"] * theta_std + theta_mean
-    res["posterior_samples"]["Robust NPE"] = res["posterior_samples"]["Robust NPE"] * theta_std + theta_mean
+    res["posterior_samples"]["RNPE"] = res["posterior_samples"]["RNPE"] * theta_std + theta_mean
     return res
 
 def main(args):
@@ -151,7 +151,7 @@ def main(args):
         "mcmc_samples": mcmc.get_samples(),
         "metrics": metrics,
         "posterior_samples": {
-            "Robust NPE": robust_posterior_samples,
+            "RNPE": robust_posterior_samples,
             "NPE": naive_posterior_samples,
         },
         "runtimes": timer.results,
@@ -167,7 +167,7 @@ def main(args):
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="Robust NPE")
+    parser = argparse.ArgumentParser(description="RNPE")
     parser.add_argument(
         "--task-name", type=str, help="Gaussian, SIR or cancer"
     )

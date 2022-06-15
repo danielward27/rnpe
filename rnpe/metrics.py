@@ -111,7 +111,7 @@ def calculate_metrics(
     )
 
     metrics = {
-        "Robust NPE": {
+        "RNPE": {
             "log_prob_theta*": theta_true_lp_robust,
             "hpd": hpd_robust,
             "point_estimate_residuals": robust_samples.mean(axis=0) - theta_true,
