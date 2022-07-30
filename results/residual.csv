@@ -1,0 +1,9 @@
+,,Squared Residuals,Squared Residuals
+Method,,NPE,RNPE
+Task,Parameter,,
+CS,$\lambda_c$,0.13,0.13
+CS,$\lambda_d$,1.91,1.22
+CS,$\lambda_p$,1.10,0.75
+Gaussian,$\mu$,0.16,0.02
+SIR,$\beta$,1.16,0.14
+SIR,$\gamma$,0.62,0.11

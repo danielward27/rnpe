@@ -23,17 +23,19 @@ class Task(ABC):
         pass
 
     @abstractmethod
-    def generate_observation(self, key: random.PRNGKey):
+    def generate_observation(self, key: random.PRNGKey, misspecified=True):
         "Generate misspecified pseudo-observed data. Returns (theta_true, y)."
         pass
 
-    def generate_dataset(self, key: random.PRNGKey, n: int, scale=True):
+    def generate_dataset(
+        self, key: random.PRNGKey, n: int, scale=True, misspecified=True
+    ):
         "Generate optionally scaled dataset with pseudo-observed value and simulations"
         theta_key, x_key, obs_key = random.split(key, 3)
         theta = self.sample_prior(theta_key, n)
         x = self.simulate(x_key, theta)
         x = remove_nans_and_warn(x)
-        theta_true, y = self.generate_observation(obs_key)
+        theta_true, y = self.generate_observation(obs_key, misspecified=misspecified)
 
         if scale:
             theta, theta_true, x, y = self.scale(theta, theta_true, x, y)
@@ -83,11 +85,11 @@ class SIR(Task):
         self.julia_env_path = julia_env_path
         self.misspecify_multiplier = misspecify_multiplier
         self.x_names = [
-            "Mean",     # Mean infections
-            "Median",   # Median infections
-            "Max",      # Max infections
+            "Mean",  # Mean infections
+            "Median",  # Median infections
+            "Max",  # Max infections
             "Max Day",  # Day of max infections
-            "Half Day", # Day where half of cumulative total number of infections reached
+            "Half Day",  # Day where half of cumulative total number of infections reached
             "Autocor",  # Autocorrelation lag 1
         ]
         self.theta_names = [r"$\beta$", r"$\gamma$"]
@@ -156,11 +158,11 @@ class SIR(Task):
         summaries = jnp.column_stack(summaries)
         return summaries
 
-    def generate_observation(self, key: random.PRNGKey):
+    def generate_observation(self, key: random.PRNGKey, misspecified=True):
         theta_key, y_key = random.split(key)
         theta_true = self.sample_prior(theta_key, 1)
         y = self.simulate(y_key, theta_true, summarise=False)
-        y = self.misspecify(y)
+        y = self.misspecify(y) if misspecified else y
         y = self.summarise(y)
         return theta_true[0, :], y[0, :]
 
@@ -186,12 +188,12 @@ class Gaussian(Task):
         x_raw_dim: int = 100,
         prior_var: float = 25,
         likelihood_var: float = 1,
-        misspecified_likeliood_var: float = 2,
+        dgp_var: float = 2,
     ):
         self.x_raw_dim = x_raw_dim
         self.prior_var = prior_var
         self.likelihood_var = likelihood_var
-        self.misspecified_likelihood_var = misspecified_likeliood_var
+        self.dgp_var = dgp_var
         self.theta_names = [r"$\mu$"]
         self.x_names = [r"$\mu$", r"$\sigma^2$"]
 
@@ -206,15 +208,25 @@ class Gaussian(Task):
         x = jnp.column_stack((x.mean(axis=1), x.var(axis=1)))
         return x
 
-    def generate_observation(self, key: random.PRNGKey):
+    def generate_observation(self, key: random.PRNGKey, misspecified=True):
         theta_key, y_key = random.split(key)
         theta_true = self.sample_prior(theta_key, 1)
+        var = self.dgp_var if misspecified else self.likelihood_var
         y_demean = random.normal(
             y_key, (theta_true.shape[0], self.x_raw_dim)
-        ) * jnp.sqrt(self.misspecified_likelihood_var)
+        ) * jnp.sqrt(var)
         y = y_demean + theta_true
         y = jnp.column_stack((y.mean(axis=1), y.var(axis=1)))
         return theta_true[0, :], y[0, :]
+
+    def get_true_posterior_mean_std(self, obs_mean, use_dgp=True):
+        "If use_dgp gets posterior under data generating process, otherwise uses the misspecified model."
+        l_var = self.dgp_var if use_dgp else self.likelihood_var
+        p_var = self.prior_var
+        n = self.x_raw_dim
+        mu = ((obs_mean * n) / l_var) * ((1 / p_var + n / l_var) ** (-1))
+        std = jnp.sqrt((1 / p_var + n / l_var) ** (-1))
+        return mu, std
 
 
 class CS(Task):
@@ -317,10 +329,10 @@ class CS(Task):
 
         return jnp.array(summaries)
 
-    def generate_observation(self, key: random.PRNGKey):
+    def generate_observation(self, key: random.PRNGKey, misspecified=True):
         theta_key, y_key = random.split(key)
         theta_true = self.sample_prior(theta_key, 1)
-        y = self.simulate(y_key, theta_true, necrosis=True)
+        y = self.simulate(y_key, theta_true, necrosis=misspecified)
         return jnp.squeeze(theta_true), jnp.squeeze(y)
 
     def sample_prior(self, key: random.PRNGKey, n: int):
@@ -336,6 +348,7 @@ class CS(Task):
         d_sorted = onp.partition(dists, kth=n_points, axis=0)
         min_d = d_sorted[n_points, onp.arange(dists.shape[1])]
         return min_d
+
 
 @numba.njit(fastmath=True)
 def dists_between(a, b):

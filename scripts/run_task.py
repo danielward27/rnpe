@@ -1,9 +1,10 @@
 from flowjax.flows import BlockNeuralAutoregressiveFlow, NeuralSplineFlow
+from flowjax.distributions import Normal
 from flowjax.train_utils import train_flow
 import jax.numpy as jnp
 from jax import random
 from numpyro.infer import MCMC, HMC, MixedHMC, init_to_value
-from rnpe.denoise import spike_and_slab_denoiser
+from rnpe.denoise import spike_and_slab_denoiser, spike_and_slab_denoiser_hyperprior
 from rnpe.tasks import SIR, Gaussian, CS
 from rnpe.metrics import calculate_metrics
 from time import time
@@ -31,6 +32,7 @@ class Timer:
         print(f"{self.label}: {elapsed:.2f}s")
         self.results[self.label] = elapsed
 
+
 def rescale_results(res):
     x_mean, x_std = res["scales"]["x_mean"], res["scales"]["x_std"]
     theta_mean, theta_std = res["scales"]["theta_mean"], res["scales"]["theta_std"]
@@ -41,11 +43,23 @@ def rescale_results(res):
     res["data"]["theta_true"] = res["data"]["theta_true"] * theta_std + theta_mean
     res["mcmc_samples"]["x"] = res["mcmc_samples"]["x"] * x_std + x_mean
 
-    res["posterior_samples"]["NPE"] = res["posterior_samples"]["NPE"] * theta_std + theta_mean
-    res["posterior_samples"]["RNPE"] = res["posterior_samples"]["RNPE"] * theta_std + theta_mean
+    res["posterior_samples"]["NPE"] = (
+        res["posterior_samples"]["NPE"] * theta_std + theta_mean
+    )
+    res["posterior_samples"]["RNPE"] = (
+        res["posterior_samples"]["RNPE"] * theta_std + theta_mean
+    )
     return res
 
+
 def main(args):
+
+    if args.misspecification_hyperprior:
+        denoiser = spike_and_slab_denoiser_hyperprior
+    else:
+        denoiser = spike_and_slab_denoiser
+
+    misspecified = not args.well_specified
 
     #### Carry out simulations ####
     tasks = {"SIR": SIR, "Gaussian": Gaussian, "CS": CS}
@@ -54,17 +68,23 @@ def main(args):
 
     timer = Timer()
     timer.start("simulations")
-    data = task.generate_dataset(subkey, args.n_sim)
+    data = task.generate_dataset(subkey, args.n_sim, misspecified=misspecified)
     timer.stop()
 
     #### Robust inference ####
     # Train marginal likelihood flow
     key, flow_key, train_key = random.split(key, 3)
-    x_flow = BlockNeuralAutoregressiveFlow(flow_key, target_dim=data["x"].shape[1])
+    base_dist = Normal(data["x"].shape[1])
+    x_flow = BlockNeuralAutoregressiveFlow(flow_key, base_dist)
 
     timer.start("q(x)_training")
     x_flow, x_losses = train_flow(
-        train_key, x_flow, data["x"], learning_rate=0.01, max_epochs=args.max_epochs, show_progress=args.show_progress
+        train_key,
+        x_flow,
+        data["x"],
+        learning_rate=0.01,
+        max_epochs=args.max_epochs,
+        show_progress=args.show_progress,
     )
     timer.stop()
 
@@ -74,12 +94,7 @@ def main(args):
     )
 
     kernel = MixedHMC(
-        HMC(
-            spike_and_slab_denoiser,
-            trajectory_length=1,
-            init_strategy=init,
-            target_accept_prob=0.95,
-        )
+        HMC(denoiser, trajectory_length=1, init_strategy=init, target_accept_prob=0.95,)
     )
 
     mcmc = MCMC(
@@ -90,11 +105,7 @@ def main(args):
     )
 
     key, mcmc_key = random.split(key)
-    model_kwargs = {
-        "y_obs": data["y"],
-        "flow": x_flow,
-        "slab_scale": args.slab_scale
-        }
+    model_kwargs = {"y_obs": data["y"], "flow": x_flow, "slab_scale": args.slab_scale}
 
     timer.start("q(x|y)_sampling")
     mcmc.run(mcmc_key, **model_kwargs)
@@ -102,10 +113,8 @@ def main(args):
 
     # Carry out posterior inference
     key, flow_key, train_key = random.split(key, 3)
-
-    posterior_flow = NeuralSplineFlow(
-        flow_key, target_dim=data["theta"].shape[1], condition_dim=data["x"].shape[1],
-    )
+    base_dist = Normal(data["theta"].shape[1])
+    posterior_flow = NeuralSplineFlow(flow_key, base_dist, cond_dim=data["x"].shape[1],)
 
     timer.start("q(theta|x)_training")
     posterior_flow, npe_losses = train_flow(
@@ -141,7 +150,7 @@ def main(args):
         naive_samples=naive_posterior_samples,
         y=data["y"],
         thin_denoised_hpd=10,  # Thin for computational reasons.
-        show_progress=args.show_progress
+        show_progress=args.show_progress,
     )
 
     timer.stop()
@@ -162,15 +171,15 @@ def main(args):
 
     results = rescale_results(results)
 
-    with open(f"{args.results_dir}/{args.seed}_{args.slab_scale}.pickle", "wb") as f:
+    fname = f"{args.results_dir}/seed={args.seed}_slab_scale={args.slab_scale}_hyperprior={args.misspecification_hyperprior}_misspecified={misspecified}.pickle"
+
+    with open(fname, "wb",) as f:
         pickle.dump(results, f)
 
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="RNPE")
-    parser.add_argument(
-        "--task-name", type=str, help="Gaussian, SIR or cancer"
-    )
+    parser.add_argument("--task-name", type=str, help="Gaussian, SIR or CS")
     parser.add_argument("--seed", type=int)
     parser.add_argument("--results-dir", help="defaults to results/task_name")
     parser.add_argument("--n-sim", default=50000, type=int)
@@ -179,6 +188,12 @@ if __name__ == "__main__":
     parser.add_argument("--mcmc-samples", default=100000, type=int)
     parser.add_argument("--posterior-samples", default=10000, type=int)
     parser.add_argument("--show-progress", action="store_true")
+    parser.add_argument(
+        "--well-specified",
+        action="store_true",
+        help="whether to use a misspecified or well specified observation",
+    )
+    parser.add_argument("--misspecification-hyperprior", action="store_true")
     parser.add_argument("--slab-scale", default=0.25, type=float)
 
     args = parser.parse_args()
