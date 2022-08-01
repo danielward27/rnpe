@@ -62,8 +62,13 @@ def main(args):
     misspecified = not args.well_specified
 
     #### Carry out simulations ####
-    tasks = {"SIR": SIR, "Gaussian": Gaussian, "CS": CS}
-    task = tasks[args.task_name]()
+    tasks = {
+        "SIR": SIR(),
+        "Gaussian": Gaussian(),
+        "CS": CS(),
+        "GaussianRaw": Gaussian(summarise=False),
+    }
+    task = tasks[args.task_name]
     key, subkey = random.split(random.PRNGKey(args.seed))
 
     timer = Timer()
@@ -143,12 +148,14 @@ def main(args):
     key, subkey = random.split(key)
 
     metrics = calculate_metrics(
+        key=key,
+        task=task,
         flow=posterior_flow,
         theta_true=data["theta_true"],
         denoised=denoised,
         robust_samples=robust_posterior_samples,
         naive_samples=naive_posterior_samples,
-        y=data["y"],
+        y_obs=data["y"],
         thin_denoised_hpd=10,  # Thin for computational reasons.
         show_progress=args.show_progress,
     )

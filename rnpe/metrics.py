@@ -1,8 +1,10 @@
 import jax
 import jax.numpy as jnp
+from jax import random
 from flowjax.flows import Flow
 from jax.scipy.special import logsumexp
 from tqdm import tqdm
+from rnpe.tasks import Task, remove_nans_and_warn
 
 
 # Too memory intensive
@@ -42,26 +44,44 @@ def log_prob_theta_true(flow, theta_true, denoised, y):
     return robust_lp_theta_true.item(), naive_lp_theta_true.item()
 
 
+def l1l2meddist(key, posterior_samples, y_obs, task):
+    # unscale theta to simulate from posterior predictive
+    posterior_samples = (
+        posterior_samples * task.scales["theta_std"] + task.scales["theta_mean"]
+    )
+    posterior_samples = posterior_samples[task.in_prior_support(posterior_samples)]
+    sims = task.simulate(key, posterior_samples)  # Posterior predicitve
+    sims = remove_nans_and_warn(sims)
+
+    # scale down x for computation of metric (help scale invariance)
+    sims = (sims - task.scales["x_mean"]) / task.scales["theta_std"]
+    difs = sims - y_obs
+    norms = [
+        jnp.median(jnp.linalg.norm(difs, axis=1, ord=i)).item() for i in [1, 2]
+    ]  # l1, l2
+    return norms
+
+
 def highest_posterior_density(
     flow: Flow,
     theta_true: jnp.ndarray,
     denoised: jnp.ndarray,
     robust_samples: jnp.ndarray,
     naive_samples: jnp.ndarray,
-    y: jnp.ndarray,
+    y_obs: jnp.ndarray,
     show_progress: bool = True,
 ):
-    """Monte carlo approximation to find the smallest heighest density region
+    """Monte carlo approximation to find the smallest highest density region
     that includes the true parameter. Returns a tuple of 100*(1-alpha)% values
     (robust, non_robust).
     """
     robust_lps = robust_posterior_log_prob(
         flow, robust_samples, denoised, show_progress
     )
-    naive_lps = flow.log_prob(naive_samples, y)
+    naive_lps = flow.log_prob(naive_samples, y_obs)
 
     robust_lp_theta_true, naive_lp_theta_true = log_prob_theta_true(
-        flow, theta_true, denoised, y
+        flow, theta_true, denoised, y_obs
     )
 
     robust_hpd = jnp.mean(robust_lps > robust_lp_theta_true).item()
@@ -70,12 +90,14 @@ def highest_posterior_density(
 
 
 def calculate_metrics(
+    key: random.PRNGKey,
+    task: Task,
     flow: Flow,
     theta_true: jnp.ndarray,
     denoised: jnp.ndarray,
     robust_samples: jnp.ndarray,
     naive_samples: jnp.ndarray,
-    y: jnp.ndarray,
+    y_obs: jnp.ndarray,
     thin_denoised_hpd: int = 1,
     show_progress: bool = True,
 ):
@@ -98,15 +120,20 @@ def calculate_metrics(
     """
 
     theta_true_lp_robust, theta_true_lp_naive = log_prob_theta_true(
-        flow, theta_true, denoised, y
+        flow, theta_true, denoised, y_obs
     )
+
+    key1, key2 = random.split(key)
+    rnpe_meddist = l1l2meddist(key1, robust_samples, y_obs, task)
+    npe_meddist = l1l2meddist(key2, naive_samples, y_obs, task)
+
     hpd_robust, hpd_naive = highest_posterior_density(
         flow=flow,
         theta_true=theta_true,
         denoised=denoised[::thin_denoised_hpd],
         robust_samples=robust_samples,
         naive_samples=naive_samples,
-        y=y,
+        y_obs=y_obs,
         show_progress=show_progress,
     )
 
@@ -115,11 +142,15 @@ def calculate_metrics(
             "log_prob_theta*": theta_true_lp_robust,
             "hpd": hpd_robust,
             "point_estimate_residuals": robust_samples.mean(axis=0) - theta_true,
+            "l1_meddist": rnpe_meddist[0],
+            "l2_meddist": rnpe_meddist[1],
         },
         "NPE": {
             "log_prob_theta*": theta_true_lp_naive,
             "hpd": hpd_naive,
             "point_estimate_residuals": naive_samples.mean(axis=0) - theta_true,
+            "l1_meddist": npe_meddist[0],
+            "l2_meddist": npe_meddist[0],
         },
     }
     return metrics

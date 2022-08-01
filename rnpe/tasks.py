@@ -178,6 +178,11 @@ class SIR(Task):
             x[:, idx] = new
         return jnp.array(x)
 
+    def in_prior_support(self, theta):
+        a = theta[:, 0] > theta[:, 1]
+        b = theta[:, 0] < 0.5
+        return a & b
+
 
 class Gaussian(Task):
     """Task to infer mean of Gaussian using samples, with misspecified std.
@@ -189,13 +194,18 @@ class Gaussian(Task):
         prior_var: float = 25,
         likelihood_var: float = 1,
         dgp_var: float = 2,
+        summarise: bool = True,
     ):
         self.x_raw_dim = x_raw_dim
         self.prior_var = prior_var
         self.likelihood_var = likelihood_var
         self.dgp_var = dgp_var
         self.theta_names = [r"$\mu$"]
-        self.x_names = [r"$\mu$", r"$\sigma^2$"]
+        self.summarise = summarise
+        if self.summarise:
+            self.x_names = [r"$\mu$", r"$\sigma^2$"]
+        else:
+            self.x_names = [fr"x_{i}" for i in range(x_raw_dim)]
 
     def sample_prior(self, key: random.PRNGKey, n: int):
         return random.normal(key, (n, 1)) * jnp.sqrt(self.prior_var)
@@ -205,7 +215,8 @@ class Gaussian(Task):
             self.likelihood_var
         )
         x = x_demean + theta
-        x = jnp.column_stack((x.mean(axis=1), x.var(axis=1)))
+        if self.summarise:
+            x = jnp.column_stack((x.mean(axis=1), x.var(axis=1)))
         return x
 
     def generate_observation(self, key: random.PRNGKey, misspecified=True):
@@ -216,7 +227,9 @@ class Gaussian(Task):
             y_key, (theta_true.shape[0], self.x_raw_dim)
         ) * jnp.sqrt(var)
         y = y_demean + theta_true
-        y = jnp.column_stack((y.mean(axis=1), y.var(axis=1)))
+
+        if self.summarise:
+            y = jnp.column_stack((y.mean(axis=1), y.var(axis=1)))
         return theta_true[0, :], y[0, :]
 
     def get_true_posterior_mean_std(self, obs_mean, use_dgp=True):
@@ -228,6 +241,9 @@ class Gaussian(Task):
         std = jnp.sqrt((1 / p_var + n / l_var) ** (-1))
         return mu, std
 
+    def in_prior_support(self, theta):
+        return jnp.full(theta.shape[0], True)
+
 
 class CS(Task):
     def __init__(self):
@@ -238,6 +254,9 @@ class CS(Task):
             "Mean Min Dist",
             "Max Min Dist",
         ]
+        self.cell_rate_lims = {"minval": 200, "maxval": 1500}
+        self.parent_rate_lims = {"minval": 3, "maxval": 20}
+        self.daughter_rate_lims = {"minval": 10, "maxval": 20}
 
     def simulate(
         self,
@@ -337,9 +356,9 @@ class CS(Task):
 
     def sample_prior(self, key: random.PRNGKey, n: int):
         keys = random.split(key, 3)
-        cell_rate = random.uniform(keys[0], (n,), minval=200, maxval=1500)
-        cancer_parent_rate = random.uniform(keys[1], (n,), minval=3, maxval=20)
-        cancer_daughter_rate = random.uniform(keys[2], (n,), minval=10, maxval=20)
+        cell_rate = random.uniform(keys[0], (n,), **self.cell_rate_lims)
+        cancer_parent_rate = random.uniform(keys[1], (n,), **self.parent_rate_lims)
+        cancer_daughter_rate = random.uniform(keys[2], (n,), **self.daughter_rate_lims,)
         return jnp.column_stack([cell_rate, cancer_parent_rate, cancer_daughter_rate])
 
     def n_nearest_dists(self, dists, n_points):
@@ -348,6 +367,14 @@ class CS(Task):
         d_sorted = onp.partition(dists, kth=n_points, axis=0)
         min_d = d_sorted[n_points, onp.arange(dists.shape[1])]
         return min_d
+
+    def in_prior_support(self, theta):
+        bools = []
+        limits = [self.cell_rate_lims, self.parent_rate_lims, self.daughter_rate_lims]
+        for col, lims in zip(theta.T, limits):
+            in_support = (col > lims["minval"]) & (col < lims["maxval"])
+            bools.append(in_support)
+        return jnp.column_stack(bools).all(axis=1)
 
 
 @numba.njit(fastmath=True)
