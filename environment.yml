@@ -12,4 +12,5 @@ dependencies:
   - jupyterlab
   - numba
   - pip:
-    - flowjax=3
+    - flowjax=5
+    - sbibm

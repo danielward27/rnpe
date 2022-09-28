@@ -3,6 +3,8 @@ import seaborn as sns
 import numpy as np
 import matplotlib
 from matplotlib.lines import Line2D
+from jax.scipy.stats import multivariate_normal
+import jax.numpy as jnp
 
 
 def pairplot(
@@ -122,7 +124,7 @@ def _trim(a, l, u):
 
 
 def get_manual_legend(labels, colors, marker="o"):
-    assert marker in ["o", "_"]
+    # assert marker in ["o", "_"]
     legend_elements = [  # Manual legend to avoid small points in legend
         Line2D(
             [0],
@@ -136,3 +138,15 @@ def get_manual_legend(labels, colors, marker="o"):
         for label, color in zip(labels, colors)
     ]
     return legend_elements
+
+
+# def gaussian_posterior_getter(p_mean, p_cov, l_cov, obs):
+#     "Obs either 1d vector or 2d for multiple i.i.d samples."
+#     obs = obs[None, :] if obs.ndim == 1 else obs
+#     n = obs.shape[0]
+#     obs_mean = obs.mean(axis=0)
+#     inv_term = jnp.linalg.inv(p_cov + (1 / n) * l_cov)
+#     mu = p_cov @ inv_term @ obs_mean + (1 / n) * l_cov @ inv_term @ p_mean
+#     cov = p_cov @ inv_term @ ((1 / n) * l_cov)
+#     return mu, cov
+

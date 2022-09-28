@@ -28,14 +28,16 @@ class Task(ABC):
         pass
 
     def generate_dataset(
-        self, key: random.PRNGKey, n: int, scale=True, misspecified=True
+        self, key: random.PRNGKey, n: int, scale=True, misspecified=True,
     ):
         "Generate optionally scaled dataset with pseudo-observed value and simulations"
         theta_key, x_key, obs_key = random.split(key, 3)
         theta = self.sample_prior(theta_key, n)
         x = self.simulate(x_key, theta)
         x = remove_nans_and_warn(x)
-        theta_true, y = self.generate_observation(obs_key, misspecified=misspecified)
+        theta_true, y, y_raw = self.generate_observation(
+            obs_key, misspecified=misspecified
+        )
 
         if scale:
             theta, theta_true, x, y = self.scale(theta, theta_true, x, y)
@@ -45,6 +47,7 @@ class Task(ABC):
             "theta_true": theta_true,
             "x": x,
             "y": y,
+            "y_raw": y_raw,
         }
 
         return data
@@ -67,14 +70,119 @@ class Task(ABC):
         }
         return theta, theta_true, x, y
 
+    def in_prior_support(self, theta):
+        return jnp.full(theta.shape[0], True)
 
-def remove_nans_and_warn(x):
-    nan_rows = jnp.any(jnp.isnan(x), axis=1)
-    n_nan = nan_rows.sum()
-    if n_nan > 0:
-        x = x[~nan_rows]
-        print(f"Warning {n_nan} simulations contained NAN values have been removed.")
-    return x
+    def get_true_posterior_samples(self, key: random.PRNGKey, y: jnp.ndarray, n: int):
+        raise NotImplementedError(
+            "This task does not have a method for sampling the true posterior implemented."
+        )
+
+
+class Gaussian(Task):
+    """Task to infer mean of Gaussian using samples, with misspecified std.
+    See https://arxiv.org/pdf/1708.01974.pdf."""
+
+    def __init__(
+        self,
+        x_raw_dim: int = 100,
+        prior_var: float = 25,
+        likelihood_var: float = 1,
+        dgp_var: float = 2,
+    ):
+        self.x_raw_dim = x_raw_dim
+        self.prior_var = prior_var
+        self.likelihood_var = likelihood_var
+        self.dgp_var = dgp_var
+        self.theta_names = [r"$\mu$"]
+        self.tractable_posterior = True
+        self.x_names = [r"$\mu$", r"$\sigma^2$"]
+
+    def sample_prior(self, key: random.PRNGKey, n: int):
+        return random.normal(key, (n, 1)) * jnp.sqrt(self.prior_var)
+
+    def simulate(self, key: random.PRNGKey, theta: jnp.ndarray):
+        x_demean = random.normal(key, (theta.shape[0], self.x_raw_dim)) * jnp.sqrt(
+            self.likelihood_var
+        )
+        x = x_demean + theta
+        x = jnp.column_stack((x.mean(axis=1), x.var(axis=1)))
+        return x
+
+    def generate_observation(self, key: random.PRNGKey, misspecified=True):
+        theta_key, y_key = random.split(key)
+        theta_true = self.sample_prior(theta_key, 1)
+        var = self.dgp_var if misspecified else self.likelihood_var
+        y_demean = random.normal(
+            y_key, (theta_true.shape[0], self.x_raw_dim)
+        ) * jnp.sqrt(var)
+        y_raw = y_demean + theta_true
+        y = jnp.column_stack((y_raw.mean(axis=1), y_raw.var(axis=1)))
+        return theta_true[0, :], y[0, :], y_raw
+
+    def get_true_posterior_samples(self, key: random.PRNGKey, y: jnp.ndarray, n: int):
+        "Ensure observation is not scaled."
+        mu, std = self._get_true_posterior_mu_std(y[0])
+        theta = random.normal(key, (n, 1))*std + mu
+        return theta
+
+    def _get_true_posterior_mu_std(self, obs_mean, use_dgp=True):
+        "If use_dgp gets posterior under data generating process, otherwise uses the misspecified model."
+        l_var = self.dgp_var if use_dgp else self.likelihood_var
+        p_var = self.prior_var
+        n = self.x_raw_dim
+        mu = ((obs_mean * n) / l_var) * ((1 / p_var + n / l_var) ** (-1))
+        std = jnp.sqrt((1 / p_var + n / l_var) ** (-1))
+        return mu, std.item()
+
+
+class GaussianLinear(Task):
+    def __init__(
+        self,
+        dim: int = 10,
+        prior_var: float = 0.1,
+        likelihood_var: float = 0.1,
+        error_var: float = 0.1,
+    ) -> None:
+        self.tractable_posterior = True
+        self.dim = dim
+        self.prior_var = prior_var
+        self.likelihood_var = likelihood_var
+        self.error_var = error_var
+        self.x_names = [fr"x_{i}" for i in range(dim)]
+        self.theta_names = [fr"\theta_{i}" for i in range(dim)]
+
+    def sample_prior(self, key: random.PRNGKey, n: int):
+        return random.normal(key, (n, self.dim)) * jnp.sqrt(self.prior_var)
+
+    def simulate(self, key: random.PRNGKey, theta: jnp.ndarray):
+        return random.normal(key, theta.shape) * jnp.sqrt(self.likelihood_var) + theta
+
+    def generate_observation(self, key: random.PRNGKey, misspecified=True):
+        var = (
+            self.likelihood_var + self.error_var
+            if misspecified
+            else self.likelihood_var
+        )
+        theta_key, y_key = random.split(key)
+        theta_true = self.sample_prior(theta_key, 1)
+        y = random.normal(y_key, theta_true.shape) * jnp.sqrt(var) + theta_true
+        return theta_true.reshape(-1), y.reshape(-1), y.reshape(-1) # No summary stats here so raw==summarised
+
+    def _get_true_posterior_mu_std(self, y, use_dgp=True):
+        "Obs either 1d vector or 2d for multiple i.i.d samples."
+        l_var = (
+            self.likelihood_var + self.error_var if use_dgp else self.likelihood_var
+        )
+        var = (self.prior_var*l_var)/(self.prior_var + l_var)
+        mu = var*(1/l_var)*y
+        return mu, jnp.full(self.dim, jnp.sqrt(var))
+
+    def get_true_posterior_samples(self, key: random.PRNGKey, y: jnp.ndarray, n: int):
+        "Ensure observation is not scaled."
+        mu, std = self._get_true_posterior_mu_std(y)
+        theta = random.normal(key, (n, self.dim))*std + mu
+        return theta
 
 
 class SIR(Task):
@@ -93,6 +201,7 @@ class SIR(Task):
             "Autocor",  # Autocorrelation lag 1
         ]
         self.theta_names = [r"$\beta$", r"$\gamma$"]
+        self.tractable_posterior = False
 
     def sample_prior(self, key: random.PRNGKey, n: int):
         u1key, u2key = random.split(key)
@@ -126,7 +235,6 @@ class SIR(Task):
 
         if summarise:
             x = self.summarise(x)
-
         return x
 
     def summarise(self, x):
@@ -161,10 +269,10 @@ class SIR(Task):
     def generate_observation(self, key: random.PRNGKey, misspecified=True):
         theta_key, y_key = random.split(key)
         theta_true = self.sample_prior(theta_key, 1)
-        y = self.simulate(y_key, theta_true, summarise=False)
-        y = self.misspecify(y) if misspecified else y
-        y = self.summarise(y)
-        return theta_true[0, :], y[0, :]
+        y_raw = self.simulate(y_key, theta_true, summarise=False)
+        y_raw = self.misspecify(y_raw) if misspecified else y_raw
+        y = self.summarise(y_raw)
+        return theta_true[0, :], y[0, :], y_raw
 
     def misspecify(self, x):
         x = onp.array(x)
@@ -179,70 +287,9 @@ class SIR(Task):
         return jnp.array(x)
 
     def in_prior_support(self, theta):
-        a = theta[:, 0] > theta[:, 1]
-        b = theta[:, 0] < 0.5
+        a = jnp.all(theta > 0, axis=1) & jnp.all(theta < 0.5, axis=1)
+        b = theta[:, 0] > theta[:, 1]
         return a & b
-
-
-class Gaussian(Task):
-    """Task to infer mean of Gaussian using samples, with misspecified std.
-    See https://arxiv.org/pdf/1708.01974.pdf."""
-
-    def __init__(
-        self,
-        x_raw_dim: int = 100,
-        prior_var: float = 25,
-        likelihood_var: float = 1,
-        dgp_var: float = 2,
-        summarise: bool = True,
-    ):
-        self.x_raw_dim = x_raw_dim
-        self.prior_var = prior_var
-        self.likelihood_var = likelihood_var
-        self.dgp_var = dgp_var
-        self.theta_names = [r"$\mu$"]
-        self.summarise = summarise
-        if self.summarise:
-            self.x_names = [r"$\mu$", r"$\sigma^2$"]
-        else:
-            self.x_names = [fr"x_{i}" for i in range(x_raw_dim)]
-
-    def sample_prior(self, key: random.PRNGKey, n: int):
-        return random.normal(key, (n, 1)) * jnp.sqrt(self.prior_var)
-
-    def simulate(self, key: random.PRNGKey, theta: jnp.ndarray):
-        x_demean = random.normal(key, (theta.shape[0], self.x_raw_dim)) * jnp.sqrt(
-            self.likelihood_var
-        )
-        x = x_demean + theta
-        if self.summarise:
-            x = jnp.column_stack((x.mean(axis=1), x.var(axis=1)))
-        return x
-
-    def generate_observation(self, key: random.PRNGKey, misspecified=True):
-        theta_key, y_key = random.split(key)
-        theta_true = self.sample_prior(theta_key, 1)
-        var = self.dgp_var if misspecified else self.likelihood_var
-        y_demean = random.normal(
-            y_key, (theta_true.shape[0], self.x_raw_dim)
-        ) * jnp.sqrt(var)
-        y = y_demean + theta_true
-
-        if self.summarise:
-            y = jnp.column_stack((y.mean(axis=1), y.var(axis=1)))
-        return theta_true[0, :], y[0, :]
-
-    def get_true_posterior_mean_std(self, obs_mean, use_dgp=True):
-        "If use_dgp gets posterior under data generating process, otherwise uses the misspecified model."
-        l_var = self.dgp_var if use_dgp else self.likelihood_var
-        p_var = self.prior_var
-        n = self.x_raw_dim
-        mu = ((obs_mean * n) / l_var) * ((1 / p_var + n / l_var) ** (-1))
-        std = jnp.sqrt((1 / p_var + n / l_var) ** (-1))
-        return mu, std
-
-    def in_prior_support(self, theta):
-        return jnp.full(theta.shape[0], True)
 
 
 class CS(Task):
@@ -257,6 +304,7 @@ class CS(Task):
         self.cell_rate_lims = {"minval": 200, "maxval": 1500}
         self.parent_rate_lims = {"minval": 3, "maxval": 20}
         self.daughter_rate_lims = {"minval": 10, "maxval": 20}
+        self.tractable_posterior = False
 
     def simulate(
         self,
@@ -351,8 +399,9 @@ class CS(Task):
     def generate_observation(self, key: random.PRNGKey, misspecified=True):
         theta_key, y_key = random.split(key)
         theta_true = self.sample_prior(theta_key, 1)
-        y = self.simulate(y_key, theta_true, necrosis=misspecified)
-        return jnp.squeeze(theta_true), jnp.squeeze(y)
+        y_raw = self.simulate(y_key, theta_true, necrosis=misspecified, summarise=False)
+        y = self.summarise(*y_raw[0])
+        return jnp.squeeze(theta_true), jnp.squeeze(y), y_raw
 
     def sample_prior(self, key: random.PRNGKey, n: int):
         keys = random.split(key, 3)
@@ -385,3 +434,12 @@ def dists_between(a, b):
         for bi in b:
             dists.append(onp.linalg.norm(ai - bi))
     return onp.array(dists).reshape(a.shape[0], b.shape[0])
+
+
+def remove_nans_and_warn(x):
+    nan_rows = jnp.any(jnp.isnan(x), axis=1)
+    n_nan = nan_rows.sum()
+    if n_nan > 0:
+        x = x[~nan_rows]
+        print(f"Warning {n_nan} simulations contained NAN values have been removed.")
+    return x

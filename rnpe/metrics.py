@@ -1,23 +1,25 @@
 import jax
 import jax.numpy as jnp
 from jax import random
-from flowjax.flows import Flow
+from flowjax.distributions import Distribution as FlowJaxDist
 from jax.scipy.special import logsumexp
 from tqdm import tqdm
-from rnpe.tasks import Task, remove_nans_and_warn
+from rnpe.tasks import Task
+from sbibm.metrics import c2st
+import torch
+import numpy as onp
 
 
 # Too memory intensive
-# def robust_posterior_log_prob(flow: Flow, theta: jnp.ndarray, denoised: jnp.ndarray):
+# def robust_posterior_log_prob(flow: FlowJaxDist, theta: jnp.ndarray, denoised: jnp.ndarray):
 #     """Given a flow q(theta|x), a matrix of theta, and denoised observations,
 #     evaluate the posterior probability as the expectation over denoised samples."""
 #     f = jax.jit(jax.vmap(flow.log_prob, in_axes=(None, 0)))
 #     res = f(theta, denoised)
 #     return logsumexp(res - jnp.log(denoised.shape[0]), axis=0)
 
-
 def robust_posterior_log_prob(
-    flow: Flow, theta: jnp.ndarray, denoised: jnp.ndarray, show_progress=False,
+    flow: FlowJaxDist, theta: jnp.ndarray, denoised: jnp.ndarray, show_progress=False,
 ):
     """Given a flow q(theta|x), a matrix of theta, and denoised observations,
     evaluate the posterior probability p(theta|y) as the expectation over
@@ -35,76 +37,24 @@ def robust_posterior_log_prob(
 
     return jnp.array(probs)
 
-
-def log_prob_theta_true(flow, theta_true, denoised, y):
-    "log prob theta*, returns tuple (robust, nonrobust)."
-    theta_2d = jnp.expand_dims(theta_true, 0)
-    robust_lp_theta_true = robust_posterior_log_prob(flow, theta_2d, denoised)
-    naive_lp_theta_true = flow.log_prob(theta_true, y)
-    return robust_lp_theta_true.item(), naive_lp_theta_true.item()
-
-
-def l1l2meddist(key, posterior_samples, y_obs, task):
-    # unscale theta to simulate from posterior predictive
-    posterior_samples = (
-        posterior_samples * task.scales["theta_std"] + task.scales["theta_mean"]
-    )
-    posterior_samples = posterior_samples[task.in_prior_support(posterior_samples)]
-    sims = task.simulate(key, posterior_samples)  # Posterior predicitve
-    sims = remove_nans_and_warn(sims)
-
-    # scale down x for computation of metric (help scale invariance)
-    sims = (sims - task.scales["x_mean"]) / task.scales["theta_std"]
-    difs = sims - y_obs
-    norms = [
-        jnp.median(jnp.linalg.norm(difs, axis=1, ord=i)).item() for i in [1, 2]
-    ]  # l1, l2
-    return norms
-
-
-def highest_posterior_density(
-    flow: Flow,
-    theta_true: jnp.ndarray,
-    denoised: jnp.ndarray,
-    robust_samples: jnp.ndarray,
-    naive_samples: jnp.ndarray,
-    y_obs: jnp.ndarray,
-    show_progress: bool = True,
-):
-    """Monte carlo approximation to find the smallest highest density region
-    that includes the true parameter. Returns a tuple of 100*(1-alpha)% values
-    (robust, non_robust).
-    """
-    robust_lps = robust_posterior_log_prob(
-        flow, robust_samples, denoised, show_progress
-    )
-    naive_lps = flow.log_prob(naive_samples, y_obs)
-
-    robust_lp_theta_true, naive_lp_theta_true = log_prob_theta_true(
-        flow, theta_true, denoised, y_obs
-    )
-
-    robust_hpd = jnp.mean(robust_lps > robust_lp_theta_true).item()
-    naive_hpd = jnp.mean(naive_lps > naive_lp_theta_true).item()
-    return 100 * robust_hpd, 100 * naive_hpd
-
-
 def calculate_metrics(
     key: random.PRNGKey,
     task: Task,
-    flow: Flow,
+    flow: FlowJaxDist,
+    noisy_flow: FlowJaxDist,
     theta_true: jnp.ndarray,
     denoised: jnp.ndarray,
     robust_samples: jnp.ndarray,
     naive_samples: jnp.ndarray,
+    noisy_samples: jnp.ndarray,
     y_obs: jnp.ndarray,
-    thin_denoised_hpd: int = 1,
+    thin_denoised_hpd: int = 20,
     show_progress: bool = True,
 ):
     """Calculate metrics for robust-NPE and NPE.
 
     Args:
-        flow (Flow): Flow approximating p(theta|x)
+        flow (FlowJaxDist): Flow approximating p(theta|x)
         theta_true (jnp.ndarray): True parameters associated with y.
         denoised (jnp.ndarray): Denoised observations.
         robust_samples (jnp.ndarray): Robust NPE posterior samples
@@ -118,39 +68,39 @@ def calculate_metrics(
         dict: Contains the log probability of the true parameters, the HPD%, and residuals
             based on posterior means as a point esimate, for both Robust NPE and NPE
     """
+    samples = {"RNPE": robust_samples, "NPE": naive_samples, "NNPE": noisy_samples}
+    metrics = {k: {} for k in samples.keys()}
 
-    theta_true_lp_robust, theta_true_lp_naive = log_prob_theta_true(
-        flow, theta_true, denoised, y_obs
-    )
+    # C2ST if referece posterior available
+    if task.tractable_posterior:
+        key, subkey = random.split(key)
+        scaled_y_obs = y_obs*task.scales["x_std"] + task.scales["x_mean"]
+        true_posterior_samples = task.get_true_posterior_samples(subkey, scaled_y_obs, robust_samples.shape[0])
+        true_posterior_samples = (true_posterior_samples - task.scales["theta_mean"]) / task.scales["theta_std"]
+        
+        for key, samps in samples.items():
+            acc = c2st(torch.from_numpy(onp.array(true_posterior_samples)), torch.from_numpy(onp.array(samps)), n_folds=3)
+            metrics[key]["C2ST"] = acc
 
-    key1, key2 = random.split(key)
-    rnpe_meddist = l1l2meddist(key1, robust_samples, y_obs, task)
-    npe_meddist = l1l2meddist(key2, naive_samples, y_obs, task)
+    else:
+        for v in metrics.values():
+            v["C2ST"] = None
+    
+    # lptheta*
+    metrics["RNPE"]["log_prob_theta*"] = robust_posterior_log_prob(flow, theta_true[None, :], denoised).item()
+    metrics["NPE"]["log_prob_theta*"] = flow.log_prob(theta_true, y_obs).item()
+    metrics["NNPE"]["log_prob_theta*"] = noisy_flow.log_prob(theta_true, y_obs).item()
+    
+    # HPD
+    robust_lps = robust_posterior_log_prob(flow, robust_samples, denoised[::thin_denoised_hpd], show_progress)
+    naive_lps = flow.log_prob(naive_samples, y_obs)
+    noisy_lps = noisy_flow.log_prob(noisy_samples, y_obs)
 
-    hpd_robust, hpd_naive = highest_posterior_density(
-        flow=flow,
-        theta_true=theta_true,
-        denoised=denoised[::thin_denoised_hpd],
-        robust_samples=robust_samples,
-        naive_samples=naive_samples,
-        y_obs=y_obs,
-        show_progress=show_progress,
-    )
+    for k, lps in zip(["RNPE", "NPE", "NNPE"], [robust_lps, naive_lps, noisy_lps]):
+        metrics[k]["hpd"] = jnp.mean(lps > metrics[k]["log_prob_theta*"]).item() * 100
+    
+    # Point estimate residuals
+    for k, samps in samples.items():
+        metrics[k]["point_estimate_residuals"] = samps.mean(axis=0) - theta_true
 
-    metrics = {
-        "RNPE": {
-            "log_prob_theta*": theta_true_lp_robust,
-            "hpd": hpd_robust,
-            "point_estimate_residuals": robust_samples.mean(axis=0) - theta_true,
-            "l1_meddist": rnpe_meddist[0],
-            "l2_meddist": rnpe_meddist[1],
-        },
-        "NPE": {
-            "log_prob_theta*": theta_true_lp_naive,
-            "hpd": hpd_naive,
-            "point_estimate_residuals": naive_samples.mean(axis=0) - theta_true,
-            "l1_meddist": npe_meddist[0],
-            "l2_meddist": npe_meddist[0],
-        },
-    }
     return metrics

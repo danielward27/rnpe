@@ -4,9 +4,9 @@
 #SBATCH --nodes=1
 #SBATCH --ntasks-per-node=1
 #SBATCH --output=/user/work/dw16200/project/misspecification/rnpe/results/logs/%x_%A_%a.out
-#SBATCH --time=0:59:59
+#SBATCH --time=1:20:00
 #SBATCH --mem=8GB
-#SBATCH --array=0-100
+#SBATCH --array=101-1000
 
 # Example submission: sbatch scripts/jobs/CS.sh
 

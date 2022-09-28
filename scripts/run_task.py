@@ -1,11 +1,12 @@
-from flowjax.flows import BlockNeuralAutoregressiveFlow, NeuralSplineFlow
+from flowjax.flows import block_neural_autoregressive_flow, coupling_flow
+from flowjax.bijections.transformers import RationalQuadraticSplineTransformer
 from flowjax.distributions import Normal
 from flowjax.train_utils import train_flow
 import jax.numpy as jnp
 from jax import random
 from numpyro.infer import MCMC, HMC, MixedHMC, init_to_value
 from rnpe.denoise import spike_and_slab_denoiser, spike_and_slab_denoiser_hyperprior
-from rnpe.tasks import SIR, Gaussian, CS
+from rnpe.tasks import SIR, Gaussian, GaussianLinear, CS
 from rnpe.metrics import calculate_metrics
 from time import time
 import pickle
@@ -52,6 +53,16 @@ def rescale_results(res):
     return res
 
 
+def add_spike_and_slab_error(
+    key: random.PRNGKey, x: jnp.ndarray, slab_scale: float, spike_scale: float = 0.01
+):
+    keys = random.split(key, 3)
+    misspecified = random.bernoulli(keys[0], shape=x.shape)
+    spike = random.normal(keys[2], shape=x.shape) * spike_scale
+    slab = random.cauchy(keys[1], shape=x.shape) * slab_scale
+    return x + misspecified * slab + (1 - misspecified) * spike
+
+
 def main(args):
 
     if args.misspecification_hyperprior:
@@ -63,12 +74,12 @@ def main(args):
 
     #### Carry out simulations ####
     tasks = {
-        "SIR": SIR(),
-        "Gaussian": Gaussian(),
-        "CS": CS(),
-        "GaussianRaw": Gaussian(summarise=False),
+        "SIR": SIR,
+        "Gaussian": Gaussian,
+        "CS": CS,
+        "GaussianLinear": GaussianLinear
     }
-    task = tasks[args.task_name]
+    task = tasks[args.task_name]()
     key, subkey = random.split(random.PRNGKey(args.seed))
 
     timer = Timer()
@@ -80,7 +91,7 @@ def main(args):
     # Train marginal likelihood flow
     key, flow_key, train_key = random.split(key, 3)
     base_dist = Normal(data["x"].shape[1])
-    x_flow = BlockNeuralAutoregressiveFlow(flow_key, base_dist)
+    x_flow = block_neural_autoregressive_flow(flow_key, base_dist)
 
     timer.start("q(x)_training")
     x_flow, x_losses = train_flow(
@@ -119,7 +130,8 @@ def main(args):
     # Carry out posterior inference
     key, flow_key, train_key = random.split(key, 3)
     base_dist = Normal(data["theta"].shape[1])
-    posterior_flow = NeuralSplineFlow(flow_key, base_dist, cond_dim=data["x"].shape[1],)
+    transformer = RationalQuadraticSplineTransformer(K=10, B=5)
+    posterior_flow = coupling_flow(flow_key, base_dist, transformer, cond_dim=data["x"].shape[1])
 
     timer.start("q(theta|x)_training")
     posterior_flow, npe_losses = train_flow(
@@ -133,15 +145,33 @@ def main(args):
     )
     timer.stop()
 
+    timer.start("q(theta|y)_training")
+    key, subkey = random.split(key)
+    noisy_sims = add_spike_and_slab_error(key, data["x"], args.slab_scale)
+
+    noisy_posterior_flow, npe_losses = train_flow(
+        train_key,
+        posterior_flow,
+        data["theta"],
+        noisy_sims,
+        max_epochs=args.max_epochs,
+        learning_rate=0.0005,
+        show_progress=args.show_progress,
+    )
+    timer.stop()
+
     timer.start("Sample posteriors and calculate metrics")
 
     #### Sample posteriors ####
     denoised = mcmc.get_samples()["x"]
-    key, subkey1, subkey2, subkey3 = random.split(key, 4)
+    key, subkey1, subkey2, subkey3, subkey4 = random.split(key, 5)
     denoised_subset = random.permutation(subkey1, denoised)[: args.posterior_samples]
-    robust_posterior_samples = posterior_flow.sample(subkey2, denoised_subset)
-    naive_posterior_samples = posterior_flow.sample(
+    robust_npe_samples = posterior_flow.sample(subkey2, denoised_subset)
+    naive_npe_samples = posterior_flow.sample(
         subkey3, data["y"], args.posterior_samples
+    )
+    noisy_npe_samples = noisy_posterior_flow.sample(
+        subkey4, data["y"], args.posterior_samples
     )
 
     #### Calculate metrics ####
@@ -151,12 +181,13 @@ def main(args):
         key=key,
         task=task,
         flow=posterior_flow,
+        noisy_flow=noisy_posterior_flow,
         theta_true=data["theta_true"],
         denoised=denoised,
-        robust_samples=robust_posterior_samples,
-        naive_samples=naive_posterior_samples,
+        robust_samples=robust_npe_samples,
+        naive_samples=naive_npe_samples,
+        noisy_samples=noisy_npe_samples,
         y_obs=data["y"],
-        thin_denoised_hpd=10,  # Thin for computational reasons.
         show_progress=args.show_progress,
     )
 
@@ -167,8 +198,9 @@ def main(args):
         "mcmc_samples": mcmc.get_samples(),
         "metrics": metrics,
         "posterior_samples": {
-            "RNPE": robust_posterior_samples,
-            "NPE": naive_posterior_samples,
+            "RNPE": robust_npe_samples,
+            "NPE": naive_npe_samples,
+            "NNPE": noisy_npe_samples,
         },
         "runtimes": timer.results,
         "names": {"x": task.x_names, "theta": task.theta_names},
@@ -186,7 +218,7 @@ def main(args):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="RNPE")
-    parser.add_argument("--task-name", type=str, help="Gaussian, SIR or CS")
+    parser.add_argument("--task-name", type=str, help="Gaussian, GaussianLinear, SIR or CS")
     parser.add_argument("--seed", type=int)
     parser.add_argument("--results-dir", help="defaults to results/task_name")
     parser.add_argument("--n-sim", default=50000, type=int)

@@ -1,4 +1,4 @@
-from flowjax.flows import Flow
+from flowjax.distributions import Distribution as FlowJaxDist
 import jax.numpy as jnp
 import numpyro
 from numpyro import sample
@@ -17,7 +17,7 @@ class FlowDist(Distribution):
     "Wraps flow as numpyro compatible distribution for MCMC."
     support = constraints.real
 
-    def __init__(self, flow: Flow):
+    def __init__(self, flow: FlowJaxDist):
         self.flow = flow
         super().__init__(batch_shape=(), event_shape=(flow.dim,))
 
@@ -32,7 +32,7 @@ class FlowDist(Distribution):
 
 def spike_and_slab_denoiser_hyperprior(
     y_obs: jnp.ndarray,
-    flow: Flow,
+    flow: FlowJaxDist,
     spike_std: float = 0.01,
     slab_scale: float = 0.25,
 ):
@@ -42,7 +42,7 @@ def spike_and_slab_denoiser_hyperprior(
 
     Args:
         y_obs (jnp.ndarray): Observed data.
-        flow (Flow): Flow from flowjax package.
+        flow (FlowJaxDist): Flow from flowjax package.
         misspecified_prob (float, optional): Prior probability of being in slab. Defaults to 0.5.
     """
     misspecified_prob = sample("misspecified_prob", Uniform(0,1))  # Bernoulli hyperprior
@@ -60,7 +60,7 @@ def spike_and_slab_denoiser_hyperprior(
 
 def spike_and_slab_denoiser(
     y_obs: jnp.ndarray,
-    flow: Flow,
+    flow: FlowJaxDist,
     spike_std: float = 0.01,
     slab_scale: float = 0.25,
     misspecified_prob: float = 0.5,
@@ -71,7 +71,7 @@ def spike_and_slab_denoiser(
 
     Args:
         y_obs (jnp.ndarray): Observed data.
-        flow (Flow): Flow from flowjax package.
+        flow (FlowJaxDist): Flow from flowjax package.
         misspecified_prob (float, optional): Prior probability of being in slab. Defaults to 0.5.
     """
     with numpyro.plate("d", len(y_obs)):
