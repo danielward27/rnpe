@@ -5,7 +5,7 @@
 #SBATCH --ntasks-per-node=1
 #SBATCH --output=/user/work/dw16200/project/misspecification/rnpe/results/logs/%x_%A_%a.out
 #SBATCH --time=0:59:00
-#SBATCH --array=100-1001
+#SBATCH --array=0-1001
 
 # Example submission: sbatch scripts/jobs/Gaussian.sh
 
